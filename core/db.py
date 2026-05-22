@@ -78,18 +78,19 @@ class DB:
 
     def get_chat_history(self, phone_number: str, limit: int = 10):
         try:
-            response = self.supabase.table("leads_messages") \
-                .select("user_message, ai_message, created_at") \
-                .eq("phone_number", phone_number) \
-                .order("created_at", desc=True) \
-                .limit(limit) \
+            response = self.supabase.table("leads") \
+                .select("conversation") \
+                .eq("user_phone_number", phone_number) \
+                .maybe_single() \
                 .execute()
 
-            history = response.data
-            history.reverse() 
-            
-            return history
+            if response.data and "conversation" in response.data:
+                history = response.data["conversation"] 
+                
+                return history[-limit:] if history else []
+                
+            return []
 
         except Exception as e:
-            print(f"⚠️ Error al obtener el historial: {str(e)}")
+            print(f"⚠️ Error al obtener el historial jsonb: {str(e)}")
             return []
