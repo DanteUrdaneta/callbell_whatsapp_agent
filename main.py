@@ -73,7 +73,7 @@ async def callbell_webhook(webhook_data: CallbellWebhook):
 
     try: 
     
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(file_url)
         
         if response.status_code == 200:
@@ -85,9 +85,10 @@ async def callbell_webhook(webhook_data: CallbellWebhook):
             )
 
             user_message = transcription.text
+            print(f"user: {user_message}")
     except Exception as audio_err:
             print(f"⚠️ Error processing the audio : {str(audio_err)}")
-    
+            traceback.print_exc()
     try:
         ai_response = await agent.run(user_message)
 
