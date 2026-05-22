@@ -75,9 +75,9 @@ async def callbell_webhook(webhook_data: CallbellWebhook):
     
     try:
         
-        lead = db.create_new_lead(customer_phone)
+        lead = db.create_new_lead(lead_phone)
 
-        await send_callbell_message(to_phone=customer_phone, text_content=ai_response.output)         
+        await send_callbell_message(to_phone=lead_phone, text_content=ai_response.output)         
     
     
         return {"status": "success", "message": "Event processed"}
