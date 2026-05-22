@@ -1,3 +1,5 @@
 pydantic-ai
 pyairtable
 fastapi[standard]
+supabase
+python-dotenv
