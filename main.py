@@ -64,7 +64,7 @@ async def callbell_webhook(webhook_data: CallbellWebhook):
     lead_phone = payload.from_number
     user_message = payload.text
 
-    ai_response = agent.run_sync(user_message)
+    ai_response = await agent.run(user_message)
     
     db.update_history_message(
                 phone_number=customer_phone,
