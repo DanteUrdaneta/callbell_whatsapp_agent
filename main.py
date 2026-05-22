@@ -64,18 +64,26 @@ async def callbell_webhook(webhook_data: CallbellWebhook):
     lead_phone = payload.from_number
     user_message = payload.text
 
-    ai_response = await agent.run(user_message)
-    
-    db.update_history_message(
-                phone_number=lead_phone,
-            user_message=user_message,
-            ai_message=ai_response.output
-        )
-    
+       
     
     try:
-        
-        lead = db.create_new_lead(lead_phone)
+        ai_response = await agent.run(user_message)
+
+        try:
+            db.update_history_message(
+                    phone_number=lead_phone,
+                    user_message=user_message,
+                    ai_message=ai_response.output
+                )
+
+        except ValueError:
+            lead = db.create_new_lead(lead_phone)
+            
+            db.update_history_message(
+                    phone_number=lead_phone,
+                    user_message=user_message,
+                    ai_message=ai_response.output
+                )
 
         await send_callbell_message(to_phone=lead_phone, text_content=ai_response.output)         
     
