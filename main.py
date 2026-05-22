@@ -9,8 +9,7 @@ app = FastAPI()
 
 class CallbellPayload(BaseModel):
     event: str                 
-    created_at: str
-    data: Dict[str, Any]
+    payload: Dict[str, Any]
 
 
 app.add_middleware(
