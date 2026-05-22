@@ -75,3 +75,21 @@ class DB:
             .execute()
         )
         return result.data
+
+    def get_chat_history(self, phone_number: str, limit: int = 10):
+        try:
+            response = self.supabase.table("leads_messages") \
+                .select("user_message, ai_message, created_at") \
+                .eq("phone_number", phone_number) \
+                .order("created_at", ascending=False) \
+                .limit(limit) \
+                .execute()
+
+            history = response.data
+            history.reverse() 
+            
+            return history
+
+        except Exception as e:
+            print(f"⚠️ Error al obtener el historial: {str(e)}")
+            return []

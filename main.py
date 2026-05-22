@@ -5,8 +5,10 @@ from dotenv import load_dotenv
 from core.db import DB
 from pydantic import BaseModel, Field
 from typing import Dict, Any, Optional, List
+from modules.tools import history
 from agents import agent
 from groq import AsyncGroq
+import traceback
 import httpx
 import os
 
@@ -90,7 +92,10 @@ async def callbell_webhook(webhook_data: CallbellWebhook):
             print(f"⚠️ Error processing the audio : {str(audio_err)}")
             traceback.print_exc()
     try:
-        ai_response = await agent.run(user_message)
+
+        db_history = db.get_chat_history(phone_number=lead_phone, limit=5)
+        
+        ai_response = await agent.run(user_message, message_history = history(db_history))
 
         try:
             db.update_history_message(
