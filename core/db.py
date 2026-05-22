@@ -81,7 +81,7 @@ class DB:
             response = self.supabase.table("leads_messages") \
                 .select("user_message, ai_message, created_at") \
                 .eq("phone_number", phone_number) \
-                .order("created_at", ascending=False) \
+                .order("created_at", desc=True) \
                 .limit(limit) \
                 .execute()
 
