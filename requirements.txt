@@ -3,3 +3,4 @@ pyairtable
 fastapi[standard]
 supabase
 python-dotenv
+groq

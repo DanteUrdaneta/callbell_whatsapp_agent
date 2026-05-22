@@ -6,6 +6,8 @@ from core.db import DB
 from pydantic import BaseModel, Field
 from typing import Dict, Any, Optional, List
 from agents import agent
+from groq import AsyncGroq
+import httpx
 import os
 
 load_dotenv()
@@ -13,15 +15,15 @@ load_dotenv()
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
+
 if not SUPABASE_URL or not SUPABASE_KEY:
     raise ValueError("❌ Error: SUPABASE_URL or SUPABASE_KEY not exist in  .env")
 
+groq_client = AsyncGroq(api_key=os.environ.get("GROQ_API_KEY"))
 app = FastAPI() 
 db = DB(url=SUPABASE_URL, key=SUPABASE_KEY)
 
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
 class CallbellPayload(BaseModel):
     to_number: str = Field(..., alias="to")
@@ -55,7 +57,8 @@ async def index():
 
 @app.post("/webhook/callbell", status_code=status.HTTP_200_OK)
 async def callbell_webhook(webhook_data: CallbellWebhook):
-
+    
+    
     payload = webhook_data.payload
 
     if payload.status != "received":
@@ -64,7 +67,26 @@ async def callbell_webhook(webhook_data: CallbellWebhook):
     lead_phone = payload.from_number
     user_message = payload.text
 
-       
+    
+    if payload.attachments and len(payload.attachments) > 0:
+        file_url = payload.attachments[0]
+
+    try: 
+    
+        async with httpx.AsyncClient() as client:
+            response = await client.get(file_url)
+        
+        if response.status_code == 200:
+            audio_bytes = response.content
+            
+            transcription = await groq_client.audio.transcriptions.create(
+            file=("audio.ogg", audio_bytes),
+            model="whisper-large-v3"
+            )
+
+            user_message = transcription.text
+    except Exception as audio_err:
+            print(f"⚠️ Error processing the audio : {str(audio_err)}")
     
     try:
         ai_response = await agent.run(user_message)
