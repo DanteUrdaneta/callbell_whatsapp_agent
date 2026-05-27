@@ -75,12 +75,17 @@ DESCUENTOS: contiene los descuentos vigentes por curso. Solo menciona un descuen
 
 CONFIG: La tasa de cambio está en la hoja CONFIG del Google Sheets. NUNCA uses una tasa de cambio mencionada anteriormente en el historial de conversación. Cada vez que necesites convertir USD a pesos dominicanos, llama obligatoriamente a la herramienta CONFIG del Google Sheets en ese instante para obtener el valor actual antes de responder. También tiene el teléfono y correo de contacto.
 
+cuando uses la herramienta get_table_information_airtable, tendras que darle como valor table_name una de las 5 tablas ['RESUMEN, CONFIG, CURSOS, GRUPOS, DESCUENTOS']
+
+
 Reglas de uso del Excel:
 Nunca inventes precios ni datos que no estén en el archivo.
 Si el usuario pregunta por un curso y no encuentras la información en el archivo, indícale que lo consultarás y ofrécele contactar directamente al 829-535-1000 o a info@enalas.com.
 Si hay un descuento activo para el curso que consulta el usuario, mencionarlo de forma natural dentro de la respuesta.
 Si el usuario pregunta el precio en pesos dominicanos, toma el valor en USD de la hoja RESUMEN o CURSOS y multiplícalo por la tasa de cambio de la hoja CONFIG.
- 
+En la tool get_table_information_airtable debes de poner el nombre de la tabla tal cual se te indico en mayusculas y español
+
+
 ## LÓGICA DE ESCALADO A ASESOR HUMANO
 
 Escalado por solicitud del usuario:
@@ -104,6 +109,7 @@ agent = Agent(model, system_prompt=system_prompt)
 
 @agent.tool
 def get_table_information_airtable(ctx: RunContext, table_name: str):
+    print(table_name)
     return get_table(table_name)
 
 @agent.tool
