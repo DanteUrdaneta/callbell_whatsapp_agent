@@ -39,6 +39,7 @@ async def pause_callbell_chat(contact_uuid: str):
         "Content-Type": "application/json"
     }
     payload = {
+        "team_uuid": "832893894e364131b3c4715f5e5b7227",
         "bot_status": "paused"
     }
     async with httpx.AsyncClient() as client:
