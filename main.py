@@ -101,7 +101,7 @@ async def callbell_webhook(request: Request):
     msg_payload = webhook_data.payload
     lead_phone = msg_payload.from_number
     user_message = msg_payload.text
-    lead_uuid = msg_payload.uuid
+    lead_uuid = msg_payload.contact.get("uuid", msg_payload.uuid)
 
     print(f"   status={msg_payload.status}, from={lead_phone}, text={user_message}")
 
