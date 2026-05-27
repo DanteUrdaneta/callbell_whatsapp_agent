@@ -121,7 +121,7 @@ async def callbell_webhook(request: Request):
     if contact_info:
         assigned_user = contact_info.get("contact", {}).get("assignedUser")
         if assigned_user:
-            print(f"👤 Asesor humano asignado ({assigned_user.get('name', 'unknown')}), ignorando mensaje del bot")
+            print(f"👤 Asesor humano asignado ({assigned_user}), ignorando mensaje del bot")
             return {"status": "ignored", "message": "Human agent assigned"}
 
     if msg_payload.attachments and len(msg_payload.attachments) > 0:
