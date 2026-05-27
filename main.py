@@ -65,12 +65,15 @@ async def callbell_webhook(webhook_data: CallbellWebhook):
 
     payload = webhook_data.payload
 
-    if payload.status != "received":
-        return {"status": "ignored", "message": "Message was not received"}
-
     lead_phone = payload.from_number
     user_message = payload.text
     lead_uuid = payload.uuid
+
+    print(f"📨 Evento recibido: status={payload.status}, from={lead_phone}, text={user_message}")
+    
+    if payload.status != "received":
+        print(f"⚠️ Ignorando mensaje con status: {payload.status}")
+        return {"status": "ignored", "message": "Message was not received"}
 
     lead = db.get_lead(lead_phone)
     if lead:
