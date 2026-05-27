@@ -1,4 +1,6 @@
-from fastapi import FastAPI, Request, status, Header, HTTPException
+from fastapi import FastAPI, Request, status, HTTPException
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from core.callbell import send_callbell_message
 from dotenv import load_dotenv
@@ -42,12 +44,19 @@ class CallbellWebhook(BaseModel):
 
 
 app.add_middleware(
-        CORSMiddleware,
+    CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    body = await request.body()
+    print(f"⚠️ 422 payload no reconocido: {body.decode()}")
+    return JSONResponse(status_code=200, content={"status": "ignored"})
 
 
 @app.get("/")
@@ -70,7 +79,7 @@ async def callbell_webhook(webhook_data: CallbellWebhook):
     lead_uuid = payload.uuid
 
     print(f"📨 Evento recibido: status={payload.status}, from={lead_phone}, text={user_message}")
-    
+
     if payload.status != "received":
         print(f"⚠️ Ignorando mensaje con status: {payload.status}")
         return {"status": "ignored", "message": "Message was not received"}
@@ -86,16 +95,14 @@ async def callbell_webhook(webhook_data: CallbellWebhook):
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(file_url)
-
             if response.status_code == 200:
                 audio_bytes = response.content
                 transcription = await groq_client.audio.transcriptions.create(
-                        file=("audio.ogg", audio_bytes),
+                    file=("audio.ogg", audio_bytes),
                     model="whisper-large-v3"
                 )
                 user_message = transcription.text
-                print(f"��️ Transcripción: {user_message}")
-
+                print(f"🎙️ Transcripción: {user_message}")
         except Exception as audio_err:
             print(f"⚠️ Error procesando audio: {str(audio_err)}")
             traceback.print_exc()
@@ -110,18 +117,19 @@ async def callbell_webhook(webhook_data: CallbellWebhook):
 
         try:
             db.update_history_message(
-                    phone_number=lead_phone,
+                phone_number=lead_phone,
                 user_message=user_message,
                 ai_message=ai_response.output
             )
         except ValueError:
             db.create_new_lead(lead_phone)
             db.update_history_message(
-                    phone_number=lead_phone,
+                phone_number=lead_phone,
                 user_message=user_message,
                 ai_message=ai_response.output
             )
 
+        print(f"🤖 Respuesta del agente: {ai_response.output[:100]}...")
         await send_callbell_message(to_phone=lead_phone, text_content=ai_response.output)
 
         return {"status": "success", "message": "Event processed"}
