@@ -10,7 +10,7 @@ api = Api(ACCESS_TOKEN)
 
 def get_table(table_name):
     table = api.table(BASE_ID, table_name)
-    print("--- getting table info ---")
+    print(f"--- getting table info {table_name}---")
     records = table.all()
     for record in records:
         print(record['fields'])
