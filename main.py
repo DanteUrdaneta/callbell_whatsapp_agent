@@ -70,25 +70,43 @@ async def callbell_webhook_verify():
 
 
 @app.post("/webhook/callbell", status_code=status.HTTP_200_OK)
-async def callbell_webhook(webhook_data: CallbellWebhook):
+async def callbell_webhook(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(status_code=200, content={"status": "ignored"})
 
-    payload = webhook_data.payload
-    lead_phone = payload.from_number
-    user_message = payload.text
-    lead_uuid = payload.uuid
+    event = body.get("event", "")
+    payload = body.get("payload", {})
 
-    print(f"📨 Evento recibido: event={webhook_data.event}, status={payload.status}, from={lead_phone}")
+    print(f"📨 Evento recibido: event={event}")
 
     # ── Reset a onboarding cuando se cierra la conversación ──
-    if webhook_data.event == "conversation_closed":
-        raw_phone = payload.contact.get("phoneNumber", lead_phone)
+    if event == "conversation_closed":
+        contact = payload.get("contact", {})
+        raw_phone = contact.get("phoneNumber", "")
         normalized = raw_phone.replace("+", "").replace(" ", "").replace("-", "")
-        db.reset_lead(normalized)
-        print(f"🔄 Conversación cerrada — lead reseteado a onboarding: {normalized}")
-        return {"status": "ok", "message": "Lead reset to onboarding"}
+        if normalized:
+            db.reset_lead(normalized)
+            print(f"🔄 Conversación cerrada — lead reseteado a onboarding: {normalized}")
+        return JSONResponse(status_code=200, content={"status": "ok"})
 
-    if payload.status != "received":
-        print(f"⚠️ Ignorando mensaje con status: {payload.status}")
+    # ── Mensajes normales ──
+    try:
+        webhook_data = CallbellWebhook(**body)
+    except Exception as e:
+        print(f"⚠️ Payload no reconocido: {e}")
+        return JSONResponse(status_code=200, content={"status": "ignored"})
+
+    msg_payload = webhook_data.payload
+    lead_phone = msg_payload.from_number
+    user_message = msg_payload.text
+    lead_uuid = msg_payload.uuid
+
+    print(f"   status={msg_payload.status}, from={lead_phone}, text={user_message}")
+
+    if msg_payload.status != "received":
+        print(f"⚠️ Ignorando mensaje con status: {msg_payload.status}")
         return {"status": "ignored", "message": "Message was not received"}
 
     lead = db.get_lead(lead_phone)
@@ -97,8 +115,8 @@ async def callbell_webhook(webhook_data: CallbellWebhook):
         if lead_status == "success":
             return {"status": "ignored", "message": "Lead already successful"}
 
-    if payload.attachments and len(payload.attachments) > 0:
-        file_url = payload.attachments[0]
+    if msg_payload.attachments and len(msg_payload.attachments) > 0:
+        file_url = msg_payload.attachments[0]
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(file_url)
