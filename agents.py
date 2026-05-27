@@ -9,8 +9,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-SUPABASE_URL   = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY   = os.environ.get("SUPABASE_KEY")
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
 db = DB(url=SUPABASE_URL, key=SUPABASE_KEY)
 
