@@ -3,13 +3,12 @@ from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.providers.google import GoogleProvider
 from modules.tools import get_table
-from core.callbell import pause_callbell_chat
+from core.callbell import escalate_to_success
 from core.db import DB
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# ── Credenciales desde .env ──────────────────────────────
 SUPABASE_URL   = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY   = os.environ.get("SUPABASE_KEY")
 
@@ -20,7 +19,6 @@ model = GoogleModel(
     provider=GoogleProvider(api_key=os.environ.get("GEMINI_API_KEY")),
 )
 
-# ── System Prompt ────────────────────────────────────────
 system_prompt = """
 ## ROL Y OBJETIVO
 
@@ -46,9 +44,9 @@ Nunca combines precio + desglose + métodos de pago + fechas en un solo mensaje.
 
 Ejemplo correcto ante "¿cuánto cuesta el Piloto Privado?":
 "El Piloto Privado en Punta Cana tiene un costo total de US$10,550.
-• Inscripción: US$450
-• Teoría: US$1,200
-• Práctica: US$8,900
+- Inscripción: US$450
+- Teoría: US$1,200
+- Práctica: US$8,900
 ¿Te explico las fechas disponibles o cómo se divide el pago?"
 
 ## CURSOS, PRECIOS Y GRUPOS
@@ -89,10 +87,10 @@ def get_table_information_airtable(ctx: RunContext, table_name: str) -> list:
 
 @agent.tool
 def scalate_to_human_support(ctx: RunContext, lead_phone_number: str, lead_uuid: str) -> str:
-    """Transfiere el lead a un asesor humano: actualiza estado y pausa el chat en Callbell"""
+    """Transfiere el lead a Atención al Cliente: actualiza estado y asigna equipo en Callbell"""
     try:
         db.update_status(phone_number=lead_phone_number, status="success")
-        callbell_ok = pause_callbell_chat(lead_uuid)
+        callbell_ok = escalate_to_success(lead_uuid)
         return f"lead moved to human support: {callbell_ok}"
     except Exception as e:
         return f"error moving lead to human support: {e}"
