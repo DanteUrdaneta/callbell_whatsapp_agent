@@ -4,3 +4,4 @@ fastapi[standard]
 supabase
 python-dotenv
 groq
+httpx
