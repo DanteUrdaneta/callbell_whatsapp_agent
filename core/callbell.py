@@ -12,7 +12,7 @@ async def send_callbell_message(to_phone: str, text_content: str):
     }
     payload = {
         "to": to_phone,
-        "from": CALLBELL_CHANNEL_UUID,
+        "from": "whatsapp",
         "type": "text",
         "content": {
             "text": text_content
