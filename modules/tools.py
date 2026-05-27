@@ -6,9 +6,10 @@ BASE_ID = "app8KjdUhteh6fbEf"
 TABLE_NAME = "RESUMEN"
 
 api = Api(ACCESS_TOKEN)
-table = api.table(BASE_ID, TABLE_NAME)
 
-def get_table():
+
+def get_table(table_name):
+    table = api.table(BASE_ID, table_name)
     print("--- getting table info ---")
     records = table.all()
     for record in records:

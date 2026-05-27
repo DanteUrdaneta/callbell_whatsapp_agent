@@ -57,6 +57,7 @@ async def index():
     return "hello world"
 
 
+
 @app.post("/webhook/callbell", status_code=status.HTTP_200_OK)
 async def callbell_webhook(webhook_data: CallbellWebhook):
     
@@ -68,7 +69,17 @@ async def callbell_webhook(webhook_data: CallbellWebhook):
     
     lead_phone = payload.from_number
     user_message = payload.text
+    lead_uuid = payload.uuid
 
+    lead = self.get_lead(phone_number)
+
+    if lead:
+        lead_status = lead.get("status")
+        
+        if lead_status == "success":
+            return "can't send reply because the lead status is successful"
+        
+    
     
     if payload.attachments and len(payload.attachments) > 0:
         file_url = payload.attachments[0]
@@ -92,9 +103,11 @@ async def callbell_webhook(webhook_data: CallbellWebhook):
             print(f"⚠️ Error processing the audio : {str(audio_err)}")
             traceback.print_exc()
     try:
-
+        
         db_history = db.get_chat_history(phone_number=lead_phone, limit=5)
         
+        complete_user_message = f"(uuid: {lead_uuid}, phone_numer: {lead_phone})"
+
         ai_response = await agent.run(user_message, message_history = history(db_history))
 
         try:
