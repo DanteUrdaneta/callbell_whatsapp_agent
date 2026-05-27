@@ -57,3 +57,23 @@ def escalate_to_success(contact_uuid: str):
     except Exception as e:
         print(f"❌ HTTP Error escalando: {str(e)}")
         return None
+
+
+def get_contact_info(contact_uuid: str) -> dict | None:
+    """Obtiene la info del contacto desde Callbell para verificar si tiene asesor asignado."""
+    url = f"https://api.callbell.eu/v1/contacts/{contact_uuid}"
+    headers = {
+        "Authorization": f"Bearer {CALLBELL_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    try:
+        with httpx.Client() as client:
+            response = client.get(url, headers=headers)
+            if response.status_code == 200:
+                return response.json()
+            else:
+                print(f"⚠️ Error obteniendo contacto: {response.status_code} - {response.text}")
+                return None
+    except Exception as e:
+        print(f"❌ HTTP Error obteniendo contacto: {str(e)}")
+        return None
