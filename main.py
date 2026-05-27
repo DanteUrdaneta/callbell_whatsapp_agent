@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request, status, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from core.callbell import send_callbell_message, escalate_to_success, get_contact_info
+from core.callbell import send_callbell_message, escalate_to_success
 from dotenv import load_dotenv
 from core.db import DB
 from pydantic import BaseModel, Field
@@ -85,8 +85,22 @@ async def callbell_webhook(request: Request):
 
     print(f"📨 Evento recibido: event={event}")
 
+    # ── Asesor asignado/desasignado manualmente en Callbell ──
     if event == "contact_updated":
-        print(f"📋 contact_updated payload: {payload}")
+        raw_phone = payload.get("phoneNumber", "")
+        normalized = raw_phone.replace("+", "").replace(" ", "").replace("-", "")
+        assigned_user = payload.get("assignedUser")
+        if normalized:
+            if assigned_user:
+                db.update_status(phone_number=normalized, status="success")
+                print(f"👤 Asesor asignado ({assigned_user}) — lead pasado a success: {normalized}")
+            else:
+                # Si se desasigna el asesor sin cerrar, el bot retoma
+                lead = db.get_lead(normalized)
+                if lead and lead.get("status") == "success":
+                    db.update_status(phone_number=normalized, status="onboarding")
+                    print(f"👤 Asesor desasignado — lead vuelto a onboarding: {normalized}")
+        return JSONResponse(status_code=200, content={"status": "ok"})
 
     # ── Reset a onboarding cuando se cierra la conversación ──
     if event == "conversation_closed":
@@ -127,20 +141,9 @@ async def callbell_webhook(request: Request):
 
     # ── Verificar estado en Supabase ──
     lead = db.get_lead(lead_phone)
-    if lead:
-        lead_status = lead.get("status")
-        if lead_status == "success":
-            return {"status": "ignored", "message": "Lead already successful"}
-
-    # ── Verificar si hay asesor humano asignado en Callbell ──
-    contact_info = get_contact_info(lead_uuid)
-    if contact_info:
-        assigned_user = contact_info.get("contact", {}).get("assignedUser")
-        if assigned_user:
-            print(f"👤 Asesor humano asignado ({assigned_user}), ignorando mensaje del bot")
-            return {"status": "ignored", "message": "Human agent assigned"}
-    else:
-        print(f"⚠️ No se pudo verificar contacto {lead_uuid}, continuando con flujo normal")
+    if lead and lead.get("status") == "success":
+        print(f"⚠️ Lead en status success, ignorando mensaje del bot")
+        return {"status": "ignored", "message": "Lead already successful"}
 
     if msg_payload.attachments and len(msg_payload.attachments) > 0:
         file_url = msg_payload.attachments[0]
