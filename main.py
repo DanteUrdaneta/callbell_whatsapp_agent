@@ -85,6 +85,9 @@ async def callbell_webhook(request: Request):
 
     print(f"📨 Evento recibido: event={event}")
 
+    if event == "contact_updated":
+        print(f"📋 contact_updated payload: {payload}")
+
     # ── Reset a onboarding cuando se cierra la conversación ──
     if event == "conversation_closed":
         contact = payload.get("contact", {})
