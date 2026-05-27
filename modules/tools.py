@@ -1,7 +1,7 @@
 from pyairtable import Api
 from pydantic_ai import ModelMessage, ModelRequest, ModelResponse, TextPart, UserPromptPart
 
-ACCESS_TOKEN = "pat6RbHdPN4t76tu5.ba6cd9280ae7305533c89723eb47e40e4b4790224ce6b854e8c5a7b16a15e208"
+ACCESS_TOKEN = "pat6Ous9xAoGdGJjp.35a64a6e9cf2c3a9b6dde787db02b051f15097a3341368ab08aa0d81553472f9"
 BASE_ID = "app8KjdUhteh6fbEf"
 TABLE_NAME = "RESUMEN"
 
