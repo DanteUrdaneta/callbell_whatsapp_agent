@@ -5,6 +5,7 @@ CALLBELL_API_KEY = os.environ.get("CALLBELL_API_KEY")
 CALLBELL_CHANNEL_UUID = os.environ.get("CALLBELL_CHANNEL_UUID")
 CALLBELL_SUCCESS_TEAM_UUID = os.environ.get("CALLBELL_SUCCESS_TEAM_UUID", "832893894e364131b3c4715f5e5b7227")
 
+
 async def send_callbell_message(to_phone: str, text_content: str):
     url = "https://api.callbell.eu/v1/messages/send"
     headers = {
@@ -33,7 +34,9 @@ async def send_callbell_message(to_phone: str, text_content: str):
             return None
 
 
-async def escalate_to_success(contact_uuid: str):
+def escalate_to_success(contact_uuid: str):
+    """Síncrona: pausa el bot y asigna al equipo de Atención al Cliente."""
+    import httpx as _httpx
     url = f"https://api.callbell.eu/v1/contacts/{contact_uuid}"
     headers = {
         "Authorization": f"Bearer {CALLBELL_API_KEY}",
@@ -43,15 +46,15 @@ async def escalate_to_success(contact_uuid: str):
         "team_uuid": CALLBELL_SUCCESS_TEAM_UUID,
         "bot_status": "paused"
     }
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.patch(url, json=payload, headers=headers)
+    try:
+        with _httpx.Client() as client:
+            response = client.patch(url, json=payload, headers=headers)
             if response.status_code in [200, 201]:
                 print(f"✅ Lead escalado a Atención al Cliente: {contact_uuid}")
                 return response.json()
             else:
                 print(f"❌ Error escalando: {response.status_code} - {response.text}")
                 return None
-        except Exception as e:
-            print(f"❌ HTTP Error escalando: {str(e)}")
-            return None
+    except Exception as e:
+        print(f"❌ HTTP Error escalando: {str(e)}")
+        return None
