@@ -16,21 +16,18 @@ load_dotenv()
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-
-
 if not SUPABASE_URL or not SUPABASE_KEY:
-    raise ValueError("❌ Error: SUPABASE_URL or SUPABASE_KEY not exist in  .env")
+    raise ValueError("❌ Error: SUPABASE_URL or SUPABASE_KEY not exist in .env")
 
 groq_client = AsyncGroq(api_key=os.environ.get("GROQ_API_KEY"))
-app = FastAPI() 
+app = FastAPI()
 db = DB(url=SUPABASE_URL, key=SUPABASE_KEY)
-
 
 
 class CallbellPayload(BaseModel):
     to_number: str = Field(..., alias="to")
     from_number: str = Field(..., alias="from")
-    text: Optional[str] = None  
+    text: Optional[str] = None
     uuid: str
     status: str
     channel: str
@@ -40,97 +37,93 @@ class CallbellPayload(BaseModel):
 
 
 class CallbellWebhook(BaseModel):
-    event: str                 
+    event: str
     payload: CallbellPayload
 
 
 app.add_middleware(
-	    CORSMiddleware,
+        CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+
 @app.get("/")
 async def index():
     return "hello world"
 
 
+@app.get("/webhook/callbell")
+async def callbell_webhook_verify():
+    return {"status": "ok"}
+
 
 @app.post("/webhook/callbell", status_code=status.HTTP_200_OK)
 async def callbell_webhook(webhook_data: CallbellWebhook):
-    
-    
+
     payload = webhook_data.payload
 
     if payload.status != "received":
         return {"status": "ignored", "message": "Message was not received"}
-    
+
     lead_phone = payload.from_number
     user_message = payload.text
     lead_uuid = payload.uuid
 
-    lead = db.get_lead(phone_number)
-
+    lead = db.get_lead(lead_phone)
     if lead:
         lead_status = lead.get("status")
-        
         if lead_status == "success":
-            return "can't send reply because the lead status is successful"
-        
-    
-    
+            return {"status": "ignored", "message": "Lead already successful"}
+
     if payload.attachments and len(payload.attachments) > 0:
         file_url = payload.attachments[0]
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(file_url)
 
-    try: 
-    
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(file_url)
-        
-        if response.status_code == 200:
-            audio_bytes = response.content
-            
-            transcription = await groq_client.audio.transcriptions.create(
-            file=("audio.ogg", audio_bytes),
-            model="whisper-large-v3"
-            )
+            if response.status_code == 200:
+                audio_bytes = response.content
+                transcription = await groq_client.audio.transcriptions.create(
+                        file=("audio.ogg", audio_bytes),
+                    model="whisper-large-v3"
+                )
+                user_message = transcription.text
+                print(f"��️ Transcripción: {user_message}")
 
-            user_message = transcription.text
-            print(f"user: {user_message}")
-    except Exception as audio_err:
-            print(f"⚠️ Error processing the audio : {str(audio_err)}")
+        except Exception as audio_err:
+            print(f"⚠️ Error procesando audio: {str(audio_err)}")
             traceback.print_exc()
-    try:
-        
-        db_history = db.get_chat_history(phone_number=lead_phone, limit=5)
-        
-        complete_user_message = f"(uuid: {lead_uuid}, phone_numer: {lead_phone})"
 
-        ai_response = await agent.run(user_message, message_history = history(db_history))
+    if not user_message:
+        return {"status": "ignored", "message": "No text or audio to process"}
+
+    try:
+        db_history = db.get_chat_history(phone_number=lead_phone, limit=5)
+        complete_user_message = f"{user_message}\n\n(uuid: {lead_uuid}, phone: {lead_phone})"
+        ai_response = await agent.run(complete_user_message, message_history=history(db_history))
 
         try:
             db.update_history_message(
                     phone_number=lead_phone,
-                    user_message=user_message,
-                    ai_message=ai_response.output
-                )
-
+                user_message=user_message,
+                ai_message=ai_response.output
+            )
         except ValueError:
-            lead = db.create_new_lead(lead_phone)
-            
+            db.create_new_lead(lead_phone)
             db.update_history_message(
                     phone_number=lead_phone,
-                    user_message=user_message,
-                    ai_message=ai_response.output
-                )
+                user_message=user_message,
+                ai_message=ai_response.output
+            )
 
-        await send_callbell_message(to_phone=lead_phone, text_content=ai_response.output)         
-    
-    
+        await send_callbell_message(to_phone=lead_phone, text_content=ai_response.output)
+
         return {"status": "success", "message": "Event processed"}
 
     except Exception as e:
         print(f"❌ Error: {str(e)}")
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail="Internal server error")
