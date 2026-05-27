@@ -94,3 +94,13 @@ class DB:
         except Exception as e:
             print(f"⚠️ Error al obtener el historial jsonb: {str(e)}")
             return []
+
+    def reset_lead(self, phone_number: str) -> dict:
+        result = (
+            self.supabase.table(self.table_name)
+            .update({"status": "onboarding", "conversation": []})
+            .eq("user_phone_number", phone_number)
+            .execute()
+        )
+        print(f"🔄 Lead reseteado a onboarding: {phone_number}")
+        return result.data
