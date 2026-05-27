@@ -71,7 +71,7 @@ async def callbell_webhook(webhook_data: CallbellWebhook):
     user_message = payload.text
     lead_uuid = payload.uuid
 
-    lead = self.get_lead(phone_number)
+    lead = db.get_lead(phone_number)
 
     if lead:
         lead_status = lead.get("status")
