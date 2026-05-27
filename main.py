@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request, status, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from core.callbell import send_callbell_message
+from core.callbell import send_callbell_message, escalate_to_success, get_contact_info
 from dotenv import load_dotenv
 from core.db import DB
 from pydantic import BaseModel, Field
@@ -109,11 +109,20 @@ async def callbell_webhook(request: Request):
         print(f"⚠️ Ignorando mensaje con status: {msg_payload.status}")
         return {"status": "ignored", "message": "Message was not received"}
 
+    # ── Verificar estado en Supabase ──
     lead = db.get_lead(lead_phone)
     if lead:
         lead_status = lead.get("status")
         if lead_status == "success":
             return {"status": "ignored", "message": "Lead already successful"}
+
+    # ── Verificar si hay asesor humano asignado en Callbell ──
+    contact_info = get_contact_info(lead_uuid)
+    if contact_info:
+        assigned_user = contact_info.get("contact", {}).get("assignedUser")
+        if assigned_user:
+            print(f"👤 Asesor humano asignado ({assigned_user.get('name', 'unknown')}), ignorando mensaje del bot")
+            return {"status": "ignored", "message": "Human agent assigned"}
 
     if msg_payload.attachments and len(msg_payload.attachments) > 0:
         file_url = msg_payload.attachments[0]
