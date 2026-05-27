@@ -25,6 +25,10 @@ groq_client = AsyncGroq(api_key=os.environ.get("GROQ_API_KEY"))
 app = FastAPI()
 db = DB(url=SUPABASE_URL, key=SUPABASE_KEY)
 
+# Cache para deduplicar mensajes procesados recientemente
+processed_messages: set = set()
+MAX_CACHE_SIZE = 200
+
 
 class CallbellPayload(BaseModel):
     to_number: str = Field(..., alias="to")
@@ -102,12 +106,21 @@ async def callbell_webhook(request: Request):
     lead_phone = msg_payload.from_number
     user_message = msg_payload.text
     lead_uuid = msg_payload.contact.get("uuid", msg_payload.uuid)
+    message_uuid = msg_payload.uuid
 
     print(f"   status={msg_payload.status}, from={lead_phone}, text={user_message}")
 
     if msg_payload.status != "received":
         print(f"⚠️ Ignorando mensaje con status: {msg_payload.status}")
         return {"status": "ignored", "message": "Message was not received"}
+
+    # ── Deduplicación de mensajes ──
+    if message_uuid in processed_messages:
+        print(f"⚠️ Mensaje duplicado ignorado: {message_uuid}")
+        return {"status": "ignored", "message": "Duplicate message"}
+    processed_messages.add(message_uuid)
+    if len(processed_messages) > MAX_CACHE_SIZE:
+        processed_messages.pop()
 
     # ── Verificar estado en Supabase ──
     lead = db.get_lead(lead_phone)
@@ -123,6 +136,8 @@ async def callbell_webhook(request: Request):
         if assigned_user:
             print(f"👤 Asesor humano asignado ({assigned_user}), ignorando mensaje del bot")
             return {"status": "ignored", "message": "Human agent assigned"}
+    else:
+        print(f"⚠️ No se pudo verificar contacto {lead_uuid}, continuando con flujo normal")
 
     if msg_payload.attachments and len(msg_payload.attachments) > 0:
         file_url = msg_payload.attachments[0]
