@@ -73,12 +73,19 @@ async def callbell_webhook_verify():
 async def callbell_webhook(webhook_data: CallbellWebhook):
 
     payload = webhook_data.payload
-
     lead_phone = payload.from_number
     user_message = payload.text
     lead_uuid = payload.uuid
 
-    print(f"📨 Evento recibido: status={payload.status}, from={lead_phone}, text={user_message}")
+    print(f"📨 Evento recibido: event={webhook_data.event}, status={payload.status}, from={lead_phone}")
+
+    # ── Reset a onboarding cuando se cierra la conversación ──
+    if webhook_data.event == "conversation_closed":
+        raw_phone = payload.contact.get("phoneNumber", lead_phone)
+        normalized = raw_phone.replace("+", "").replace(" ", "").replace("-", "")
+        db.reset_lead(normalized)
+        print(f"🔄 Conversación cerrada — lead reseteado a onboarding: {normalized}")
+        return {"status": "ok", "message": "Lead reset to onboarding"}
 
     if payload.status != "received":
         print(f"⚠️ Ignorando mensaje con status: {payload.status}")
