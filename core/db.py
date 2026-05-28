@@ -2,6 +2,9 @@ import datetime
 from supabase import create_client, Client
 from postgrest.exceptions import APIError
 
+MAX_RECORDATORIOS = 2  # Máximo de recordatorios por sesión antes de dejar de molestar
+
+
 class DB:
     def __init__(self, url: str, key: str):
         self.supabase: Client = create_client(url, key)
@@ -13,7 +16,8 @@ class DB:
             "status": status,
             "conversation": [],
             "ultimo_mensaje": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            "recordatorio_enviado": False
+            "recordatorio_enviado": False,
+            "recordatorio_count": 0,
         }
         try:
             result = self.supabase.table(self.table_name).insert(new_lead).execute()
@@ -54,16 +58,53 @@ class DB:
         new_messages = {
             "user_message": user_message,
             "ai_message": ai_message,
-            "date": datetime.datetime.now(datetime.timezone.utc).isoformat()
+            "date": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         }
         actual_history_message.append(new_messages)
         result = (
             self.supabase.table(self.table_name)
-            .update({
-                "conversation": actual_history_message,
-                "ultimo_mensaje": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                "recordatorio_enviado": False
-            })
+            .update(
+                {
+                    "conversation": actual_history_message,
+                    "ultimo_mensaje": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    # Resetea flags cuando el usuario escribe activamente
+                    "recordatorio_enviado": False,
+                    "recordatorio_count": 0,
+                }
+            )
+            .eq("user_phone_number", phone_number)
+            .execute()
+        )
+        return result.data
+
+    def save_reminder_to_history(self, phone_number: str, ai_message: str) -> dict:
+        """
+        Guarda el mensaje de recordatorio en el historial SIN resetear recordatorio_enviado.
+        También actualiza ultimo_mensaje para que el scheduler no vuelva a disparar
+        inmediatamente en el próximo ciclo.
+        """
+        user = self.get_lead(phone_number)
+        if not user:
+            raise ValueError(f"lead not found with: {phone_number}")
+        actual_history = user.get("conversation")
+        if not isinstance(actual_history, list):
+            actual_history = []
+        actual_history.append(
+            {
+                "user_message": "[RECORDATORIO AUTOMÁTICO]",
+                "ai_message": ai_message,
+                "date": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            }
+        )
+        result = (
+            self.supabase.table(self.table_name)
+            .update(
+                {
+                    "conversation": actual_history,
+                    # Actualiza ultimo_mensaje para evitar re-trigger inmediato
+                    "ultimo_mensaje": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                }
+            )
             .eq("user_phone_number", phone_number)
             .execute()
         )
@@ -71,14 +112,21 @@ class DB:
 
     def get_chat_history(self, phone_number: str, limit: int = 10):
         try:
-            response = self.supabase.table("leads") \
-                .select("conversation") \
-                .eq("user_phone_number", phone_number) \
-                .maybe_single() \
+            response = (
+                self.supabase.table("leads")
+                .select("conversation")
+                .eq("user_phone_number", phone_number)
+                .maybe_single()
                 .execute()
+            )
             if response.data and "conversation" in response.data:
                 history = response.data["conversation"]
-                return history[-limit:] if history else []
+                # Filtra entradas de recordatorios automáticos para no confundir al agente
+                clean_history = [
+                    msg for msg in history
+                    if msg.get("user_message") != "[RECORDATORIO AUTOMÁTICO]"
+                ]
+                return clean_history[-limit:] if clean_history else []
             return []
         except Exception as e:
             print(f"⚠️ Error al obtener el historial jsonb: {str(e)}")
@@ -87,12 +135,15 @@ class DB:
     def reset_lead(self, phone_number: str) -> dict:
         result = (
             self.supabase.table(self.table_name)
-            .update({
-                "status": "onboarding",
-                "conversation": [],
-                "ultimo_mensaje": None,
-                "recordatorio_enviado": False
-            })
+            .update(
+                {
+                    "status": "onboarding",
+                    "conversation": [],
+                    "ultimo_mensaje": None,
+                    "recordatorio_enviado": False,
+                    "recordatorio_count": 0,
+                }
+            )
             .eq("user_phone_number", phone_number)
             .execute()
         )
@@ -100,14 +151,20 @@ class DB:
         return result.data
 
     def get_leads_para_recordatorio(self, antes_de: str) -> list:
-        """Obtiene leads en onboarding sin recordatorio enviado y con último mensaje antes del timestamp dado."""
+        """
+        Obtiene leads en onboarding que:
+        - No tienen recordatorio pendiente enviado
+        - Su último mensaje real fue antes del timestamp dado
+        - No han superado el límite de recordatorios por sesión
+        """
         try:
             result = (
                 self.supabase.table(self.table_name)
-                .select("user_phone_number, ultimo_mensaje")
+                .select("user_phone_number, ultimo_mensaje, recordatorio_count")
                 .eq("status", "onboarding")
                 .eq("recordatorio_enviado", False)
                 .lt("ultimo_mensaje", antes_de)
+                .lt("recordatorio_count", MAX_RECORDATORIOS)
                 .not_.is_("ultimo_mensaje", "null")
                 .execute()
             )
@@ -117,9 +174,17 @@ class DB:
             return []
 
     def marcar_recordatorio_enviado(self, phone_number: str) -> dict:
+        """Marca el recordatorio como enviado e incrementa el contador."""
+        lead = self.get_lead(phone_number)
+        current_count = lead.get("recordatorio_count", 0) if lead else 0
         result = (
             self.supabase.table(self.table_name)
-            .update({"recordatorio_enviado": True})
+            .update(
+                {
+                    "recordatorio_enviado": True,
+                    "recordatorio_count": current_count + 1,
+                }
+            )
             .eq("user_phone_number", phone_number)
             .execute()
         )
