@@ -99,18 +99,15 @@ class DB:
         print(f"🔄 Lead reseteado a onboarding: {phone_number}")
         return result.data
 
-    def get_leads_para_recordatorio(self) -> list:
-        """Obtiene leads en onboarding sin recordatorio enviado y con último mensaje hace más de 24 horas."""
-        hace_24h = (
-            datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=24)
-        ).isoformat()
+    def get_leads_para_recordatorio(self, antes_de: str) -> list:
+        """Obtiene leads en onboarding sin recordatorio enviado y con último mensaje antes del timestamp dado."""
         try:
             result = (
                 self.supabase.table(self.table_name)
                 .select("user_phone_number, ultimo_mensaje")
                 .eq("status", "onboarding")
                 .eq("recordatorio_enviado", False)
-                .lt("ultimo_mensaje", hace_24h)
+                .lt("ultimo_mensaje", antes_de)
                 .not_.is_("ultimo_mensaje", "null")
                 .execute()
             )
