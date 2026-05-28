@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+from collections import deque
 from fastapi import FastAPI, Request, status, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -23,12 +25,21 @@ if not SUPABASE_URL or not SUPABASE_KEY:
     raise ValueError("❌ Error: SUPABASE_URL or SUPABASE_KEY not exist in .env")
 
 groq_client = AsyncGroq(api_key=os.environ.get("GROQ_API_KEY"))
-app = FastAPI()
 db = DB(url=SUPABASE_URL, key=SUPABASE_KEY)
 
-# Cache para deduplicar mensajes procesados recientemente
-processed_messages: set = set()
+# Cache FIFO para deduplicar mensajes procesados recientemente
 MAX_CACHE_SIZE = 200
+processed_messages: deque = deque(maxlen=MAX_CACHE_SIZE)
+
+
+# ── Lifespan (reemplaza el deprecado @app.on_event) ──────────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    start_scheduler(db)
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 
 class CallbellPayload(BaseModel):
@@ -62,11 +73,6 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     body = await request.body()
     print(f"⚠️ 422 payload no reconocido: {body.decode()}")
     return JSONResponse(status_code=200, content={"status": "ignored"})
-
-
-@app.on_event("startup")
-async def startup_event():
-    start_scheduler(db)
 
 
 @app.get("/")
@@ -136,13 +142,11 @@ async def callbell_webhook(request: Request):
         print(f"⚠️ Ignorando mensaje con status: {msg_payload.status}")
         return {"status": "ignored", "message": "Message was not received"}
 
-    # ── Deduplicación de mensajes ──
+    # ── Deduplicación FIFO ──
     if message_uuid in processed_messages:
         print(f"⚠️ Mensaje duplicado ignorado: {message_uuid}")
         return {"status": "ignored", "message": "Duplicate message"}
-    processed_messages.add(message_uuid)
-    if len(processed_messages) > MAX_CACHE_SIZE:
-        processed_messages.pop()
+    processed_messages.append(message_uuid)  # deque(maxlen=200) elimina el más antiguo automáticamente
 
     # ── Verificar estado en Supabase ──
     lead = db.get_lead(lead_phone)
@@ -179,14 +183,14 @@ async def callbell_webhook(request: Request):
             db.update_history_message(
                 phone_number=lead_phone,
                 user_message=user_message,
-                ai_message=ai_response.output
+                ai_message=ai_response.output,
             )
         except ValueError:
             db.create_new_lead(lead_phone)
             db.update_history_message(
                 phone_number=lead_phone,
                 user_message=user_message,
-                ai_message=ai_response.output
+                ai_message=ai_response.output,
             )
 
         print(f"🤖 Respuesta del agente: {ai_response.output[:100]}...")
