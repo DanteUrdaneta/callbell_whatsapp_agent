@@ -3,6 +3,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from core.callbell import send_callbell_message, escalate_to_success
+from core.scheduler import start_scheduler
 from dotenv import load_dotenv
 from core.db import DB
 from pydantic import BaseModel, Field
@@ -63,6 +64,11 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     return JSONResponse(status_code=200, content={"status": "ignored"})
 
 
+@app.on_event("startup")
+async def startup_event():
+    start_scheduler(db)
+
+
 @app.get("/")
 async def index():
     return "hello world"
@@ -95,7 +101,6 @@ async def callbell_webhook(request: Request):
                 db.update_status(phone_number=normalized, status="success")
                 print(f"👤 Asesor asignado ({assigned_user}) — lead pasado a success: {normalized}")
             else:
-                # Si se desasigna el asesor sin cerrar, el bot retoma
                 lead = db.get_lead(normalized)
                 if lead and lead.get("status") == "success":
                     db.update_status(phone_number=normalized, status="onboarding")
