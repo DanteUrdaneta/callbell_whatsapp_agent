@@ -61,11 +61,17 @@ class DB:
             "date": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         }
         actual_history_message.append(new_messages)
+
+        # Si el lead estaba inactive y volvió a escribir, lo reactivamos
+        current_status = user.get("status", "onboarding")
+        new_status = "onboarding" if current_status == "inactive" else current_status
+
         result = (
             self.supabase.table(self.table_name)
             .update(
                 {
                     "conversation": actual_history_message,
+                    "status": new_status,
                     "ultimo_mensaje": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                     # Resetea flags cuando el usuario escribe activamente
                     "recordatorio_enviado": False,
@@ -172,6 +178,25 @@ class DB:
         except Exception as e:
             print(f"⚠️ Error obteniendo leads para recordatorio: {str(e)}")
             return []
+
+    def set_inactive(self, phone_number: str) -> dict:
+        """
+        Marca el lead como 'inactive': el usuario ya obtuvo lo que quería y se retiró.
+        El scheduler NO enviará recordatorios a leads con este status.
+        Se resetea a 'onboarding' si el usuario vuelve a escribir.
+        """
+        result = (
+            self.supabase.table(self.table_name)
+            .update({
+                "status": "inactive",
+                "recordatorio_enviado": True,  # Previene cualquier recordatorio pendiente
+                "recordatorio_count": MAX_RECORDATORIOS,  # Lleva el contador al máximo
+            })
+            .eq("user_phone_number", phone_number)
+            .execute()
+        )
+        print(f"😴 Lead marcado como inactive: {phone_number}")
+        return result.data
 
     def marcar_recordatorio_enviado(self, phone_number: str) -> dict:
         """Marca el recordatorio como enviado e incrementa el contador."""
