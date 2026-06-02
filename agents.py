@@ -158,7 +158,18 @@ Solo llama a scalate_to_human_support cuando se cumplan LAS TRES condiciones:
 No escales en el mismo mensaje donde pides los datos. Llama a la tool en el mensaje siguiente tras recibir nombre + contacto completos.
 
 NUNCA llames a scalate_to_human_support solo porque no puedas responder algo. Si no tienes la info, consulta las herramientas de Airtable.
-"""
+
+NUNCA llames a scalate_to_human_support cuando el usuario se despide, dice gracias, o simplemente termina la conversación. Un mensaje de cierre NO es una solicitud de asesor humano.
+
+---
+
+## LÓGICA DE CIERRE DE CONVERSACIÓN (usuario satisfecho)
+
+Cuando detectes que el usuario ya obtuvo la información que buscaba y se retira (frases de despedida como "gracias", "ya entendí", "perfecto, hasta luego", "ok, eso era todo", etc.), llama a la herramienta mark_conversation_as_inactive con el número de teléfono del usuario.
+
+Esto evita que el sistema le envíe recordatorios molestos cuando ya resolvió su consulta.
+
+NO llames a mark_conversation_as_inactive si el usuario sigue con dudas o no ha dado señales claras de retirarse."""
 
 agent = Agent(model, system_prompt=system_prompt)
 
@@ -167,6 +178,20 @@ agent = Agent(model, system_prompt=system_prompt)
 def get_table_information_airtable(ctx: RunContext, table_name: str) -> list:
     """Obtiene información de las tablas de Airtable: RESUMEN, CONFIG, CURSOS, GRUPOS, DESCUENTOS"""
     return get_table(table_name)
+
+
+@agent.tool
+def mark_conversation_as_inactive(ctx: RunContext, lead_phone_number: str) -> str:
+    """
+    Marca al usuario como 'inactive' cuando ya obtuvo la información que buscaba y se retiró.
+    Esto evita que el sistema le envíe recordatorios automáticos innecesarios.
+    Úsala cuando el usuario se despida o deje claro que ya no tiene más preguntas.
+    """
+    try:
+        db.set_inactive(phone_number=lead_phone_number)
+        return "lead marcado como inactive: no recibirá más recordatorios en esta sesión"
+    except Exception as e:
+        return f"error marcando lead como inactive: {e}"
 
 
 @agent.tool
