@@ -236,6 +236,11 @@ async def callbell_webhook(request: Request):
         clean_response = re.sub(r'\\times', 'x', clean_response)               # \times
         clean_response = re.sub(r'\\approx', '≈', clean_response)              # \approx
         clean_response = re.sub(r'\\,', ' ', clean_response)                   # \,
+        clean_response = re.sub(r'\\\[.*?\\\]', lambda m: m.group(0)           # LaTeX block \[ \]
+            .replace('\\[', '').replace('\\]', '')
+            .replace('\\,', ' ').replace('\\text{', '').replace('}', '')
+            .replace('\\times', 'x').replace('\\approx', '≈').strip(),
+            clean_response, flags=re.DOTALL)
 
         await send_callbell_message(to_phone=lead_phone, text_content=clean_response)
 
