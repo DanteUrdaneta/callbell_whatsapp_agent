@@ -208,12 +208,21 @@ async def callbell_webhook(request: Request):
 
         print(f"🤖 Respuesta del agente: {ai_response.output[:100]}...")
 
-        # Limpiar markdown que el modelo pueda colar (asteriscos, negritas, etc.)
+        # Limpiar markdown y LaTeX que el modelo pueda colar
         clean_response = ai_response.output
         import re
-        clean_response = re.sub(r'\*+([^*]+)\*+', r'\1', clean_response)  # **texto** o *texto*
-        clean_response = re.sub(r'_+([^_]+)_+', r'\1', clean_response)    # __texto__ o _texto_
+        clean_response = re.sub(r'\*+([^*]+)\*+', r'\1', clean_response)       # **texto** o *texto*
+        clean_response = re.sub(r'_+([^_]+)_+', r'\1', clean_response)         # __texto__ o _texto_
         clean_response = re.sub(r'^#{1,6}\s+', '', clean_response, flags=re.MULTILINE)  # # headers
+        clean_response = re.sub(r'\\\(.*?\\\)', lambda m: m.group(0)           # LaTeX inline \( \)
+            .replace('\\(', '').replace('\\)', '')
+            .replace('\\,', ' ').replace('\\text{', '').replace('}', '')
+            .replace('\\times', 'x').replace('\\approx', '≈').strip(),
+            clean_response)
+        clean_response = re.sub(r'\\text\{([^}]+)\}', r'\1', clean_response)   # \text{...}
+        clean_response = re.sub(r'\\times', 'x', clean_response)               # \times
+        clean_response = re.sub(r'\\approx', '≈', clean_response)              # \approx
+        clean_response = re.sub(r'\\,', ' ', clean_response)                   # \,
 
         await send_callbell_message(to_phone=lead_phone, text_content=clean_response)
 
