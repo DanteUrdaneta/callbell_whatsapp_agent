@@ -175,8 +175,33 @@ def get_table_information_airtable(ctx: RunContext, table_name: str) -> list:
 
 @agent.tool
 def scalate_to_human_support(ctx: RunContext, lead_phone_number: str, lead_uuid: str) -> str:
-    """Transfiere el lead a Atención al Cliente: actualiza estado y asigna equipo en Callbell"""
+    """Transfiere el lead a Atención al Cliente: actualiza estado y asigna equipo en Callbell. Solo usar cuando el usuario pidió explícitamente hablar con un asesor humano."""
     try:
+        # Verificar en el historial que el usuario realmente pidió un asesor
+        lead = db.get_lead(lead_phone_number)
+        conversation = lead.get("conversation", []) if lead else []
+
+        ESCALATION_KEYWORDS = [
+            "asesor", "agente", "humano", "persona", "hablar con alguien",
+            "llamar", "llamame", "llámame", "quiero hablar", "me pueden llamar",
+            "pueden contactarme", "contactarme", "inscribir", "inscribirme",
+            "quiero empezar", "quiero matricularme", "proceder"
+        ]
+
+        user_messages = " ".join(
+            m.get("user_message", "").lower()
+            for m in conversation[-5:]  # Últimos 5 mensajes
+        )
+
+        pidio_asesor = any(kw in user_messages for kw in ESCALATION_KEYWORDS)
+
+        if not pidio_asesor:
+            return (
+                "ESCALADO BLOQUEADO: El usuario no ha pedido explícitamente hablar con un asesor. "
+                "No escales. Continúa la conversación normalmente y solo escala si el usuario "
+                "pide contacto humano, quiere inscribirse, o pide que lo llamen."
+            )
+
         db.update_status(phone_number=lead_phone_number, status="success")
         callbell_ok = escalate_to_success(lead_uuid)
         return f"lead moved to human support: {callbell_ok}"
