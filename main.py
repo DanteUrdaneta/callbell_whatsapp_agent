@@ -176,7 +176,20 @@ async def callbell_webhook(request: Request):
 
     try:
         db_history = db.get_chat_history(phone_number=lead_phone, limit=5)
-        complete_user_message = f"{user_message}\n\n(uuid: {lead_uuid}, phone: {lead_phone})"
+
+        # Si el usuario pregunta por precios en pesos, inyectar la tasa de cambio automáticamente
+        PESOS_KEYWORDS = ["pesos", "peso dominicano", "dop", "en pesos", "a pesos"]
+        msg_lower = user_message.lower()
+        tasa_info = ""
+        if any(kw in msg_lower for kw in PESOS_KEYWORDS):
+            try:
+                from modules.tools import get_table
+                config_data = get_table("CONFIG")
+                tasa_info = f"\n\n[SISTEMA: Tasa de cambio actual de Airtable → {config_data}. Usa este valor para convertir, no inventes ninguno.]"
+            except Exception as e:
+                print(f"⚠️ No se pudo obtener CONFIG: {e}")
+
+        complete_user_message = f"{user_message}\n\n(uuid: {lead_uuid}, phone: {lead_phone}){tasa_info}"
         ai_response = await agent.run(complete_user_message, message_history=history(db_history))
 
         try:
