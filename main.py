@@ -193,6 +193,19 @@ async def callbell_webhook(request: Request):
                 ai_message=ai_response.output,
             )
 
+        # Detectar despedida del usuario para evitar recordatorios innecesarios
+        FAREWELL_KEYWORDS = [
+            "gracias", "hasta luego", "hasta pronto", "adiós", "adios",
+            "bye", "chao", "chau", "ok gracias", "muchas gracias",
+            "ya entendí", "ya entendi", "perfecto gracias", "listo gracias",
+            "eso era todo", "ya fue", "con eso es todo", "me retiro",
+        ]
+        user_msg_lower = user_message.lower().strip()
+        es_despedida = any(kw in user_msg_lower for kw in FAREWELL_KEYWORDS)
+        if es_despedida:
+            db.set_inactive(phone_number=lead_phone)
+            print(f"😴 Usuario se despidió — lead marcado como inactive: {lead_phone}")
+
         print(f"🤖 Respuesta del agente: {ai_response.output[:100]}...")
         await send_callbell_message(to_phone=lead_phone, text_content=ai_response.output)
 
