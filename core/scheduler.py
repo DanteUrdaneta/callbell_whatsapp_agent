@@ -4,7 +4,7 @@ from core.db import DB
 from core.callbell import send_callbell_message
 
 # Minutos de inactividad antes de enviar el primer recordatorio
-MINUTOS_INACTIVIDAD = 3
+MINUTOS_INACTIVIDAD = 1
 
 
 def start_scheduler(db: DB):
