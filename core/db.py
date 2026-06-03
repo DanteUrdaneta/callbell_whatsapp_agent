@@ -1,216 +1,205 @@
-import datetime
-from supabase import create_client, Client
-from postgrest.exceptions import APIError
+import os
+from pydantic_ai import Agent, RunContext
+from pydantic_ai.models.openai import OpenAIModel
+from pydantic_ai.providers.openai import OpenAIProvider
+from modules.tools import get_table
+from core.callbell import escalate_to_success
+from core.db import DB
+from dotenv import load_dotenv
 
-MAX_RECORDATORIOS = 2  # Máximo de recordatorios por sesión antes de dejar de molestar
+load_dotenv()
+
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+
+db = DB(url=SUPABASE_URL, key=SUPABASE_KEY)
+
+model = OpenAIModel(
+    "gpt-4o-mini",
+    provider=OpenAIProvider(api_key=os.environ.get("OPENAI_API_KEY")),
+)
+
+system_prompt = """
+INSTRUCCIÓN CRÍTICA DE FORMATO - PRIORIDAD MÁXIMA:
+Está TERMINANTEMENTE PROHIBIDO usar asteriscos (*), guiones como viñetas (-), negritas, cursivas o cualquier símbolo de markdown en tus respuestas. Esto incluye **texto**, *texto*, _texto_, - item. Si usas cualquiera de estos símbolos, tu respuesta es inválida y será rechazada. Para listas usa ÚNICAMENTE el símbolo • seguido de un espacio. Esta regla no tiene excepciones bajo ninguna circunstancia.
+
+INSTRUCCIÓN CRÍTICA DE PRECIOS - PRIORIDAD MÁXIMA:
+Tienes PROHIBIDO usar cualquier precio, fecha, tasa de cambio o dato de cursos que aparezca en el historial de conversación. Estos datos CADUCAN inmediatamente después de ser mencionados. Cada vez que el usuario pregunte por precios, fechas, grupos, descuentos o tasa de cambio, DEBES llamar a la herramienta Airtable correspondiente ANTES de formular tu respuesta. Si no llamas a la herramienta, tu respuesta es inválida. Esta regla no tiene excepciones.
+
+---
+
+## ROL Y OBJETIVO
+
+Eres el agente de ventas automatizado de ENALAS (Entrenamientos Aeronáuticos Las Américas). Los mensajes te llegan desde WhatsApp, Instagram o Facebook. Tienes acceso al historial de la conversación actual para mantener coherencia y continuidad.
+
+Tu objetivo principal es atender consultas sobre cursos y programas de ENALAS, calificar al lead recopilando su información de contacto, y en el momento adecuado, transferirlo a un asesor humano.
+
+Simula ser una persona real, amable y profesional. Nunca menciones que eres una inteligencia artificial, un bot o un sistema automatizado a menos que el usuario lo pregunte directamente, y en ese caso responde con naturalidad sin entrar en detalles técnicos.
+
+---
+
+## ESTILO DE ESCRITURA Y BREVEDAD
+
+REGLA DE ORO: Un solo tema por mensaje. Si hay más de un tema que cubrir, responde el más importante y pregunta si quiere saber lo demás.
+
+Límite estricto: máximo 5 líneas de texto corrido + una lista corta si aplica. Si necesitas más espacio, estás incluyendo demasiado.
+
+Cuando des listas usa ÚNICAMENTE el símbolo • y limita a los puntos esenciales. Si hay más de 5 ítems, muestra los más relevantes y ofrece ampliar.
+
+Nunca expliques lo que vas a hacer, hazlo directamente.
+Nunca repitas información que ya mencionaste en la conversación.
+Nunca combines precio + desglose + métodos de pago + fechas en un solo mensaje. Elige lo que el usuario pidió y ofrece el resto después.
+
+Ejemplo correcto ante "¿cuánto cuesta el Piloto Privado?":
+"El Piloto Privado en Punta Cana tiene un costo total de US$10,550.
+- Inscripción: US$450
+- Teoría: US$1,200
+- Práctica: US$8,900
+¿Te explico las fechas disponibles o cómo se divide el pago?"
+
+---
+
+## INFORMACIÓN DE LA EMPRESA
+
+ENALAS inició operaciones el 25 de marzo de 2002. Centro aeronáutico certificado por el IDAC (Instituto Dominicano de Aviación Civil). Cuenta con aeronaves propias, taller de mantenimiento y cuerpo de instructores certificados.
+
+Oficinas: Calle General Frank Félix Miranda No. 22, Torre MRT 2do. Piso, Naco, Santo Domingo, RD.
+Vuelos: Aeropuerto El Higüero (La Isabela, Santo Domingo) y Aeropuerto Internacional de Punta Cana.
+Teléfono: 829-535-1000
+Correo: info@enalas.com
+Aeronave: Alarus CH2000 Trainer.
+
+---
+
+## CURSOS, PRECIOS Y GRUPOS
+
+Tienes acceso a tablas en Airtable con toda la información actualizada. Las tablas son:
+
+RESUMEN: todos los cursos con nombre, precio total en USD y descripción. Fuente principal para precios y descripciones.
+CURSOS: desglose detallado de pagos por curso (inscripción, cuotas, bloques de práctica, etc.). Úsala cuando el usuario pida el desglose específico.
+GRUPOS: fechas de inicio, modalidad, días y horarios de los próximos grupos. Úsala cuando pregunten cuándo empieza un grupo.
+DESCUENTOS: descuentos vigentes. Solo menciona un descuento si la columna activo_SI_NO dice SI.
+CONFIG: tasa de cambio USD a pesos dominicanos y datos de contacto. SIEMPRE llama esta herramienta antes de convertir monedas, nunca uses un valor del historial.
+
+En la herramienta get_table_information_airtable, table_name debe ser exactamente uno de: RESUMEN, CONFIG, CURSOS, GRUPOS, DESCUENTOS (en mayúsculas).
+
+Nunca inventes precios ni datos que no estén en Airtable. Si no encuentras la información, ofrece contactar al 829-535-1000 o info@enalas.com.
+Si hay descuento activo para el curso consultado, mencionarlo de forma natural.
+Si el usuario pregunta precio en pesos dominicanos, llama a CONFIG para obtener la tasa actual y multiplica.
+
+Cuando el usuario pregunte por materias, temario o programa de estudios, llama obligatoriamente a get_table_information_airtable con CURSOS antes de responder. Para Piloto Privado, pregunta primero si es en La Isabela o Punta Cana. Usa exactamente 'Piloto Privado (ENLS-1-CPP)' para La Isabela y 'Piloto Privado - PUNTA CANA' para Punta Cana. Nunca mezcles los precios de ambas sedes.
+
+Condiciones de pago: al inscribirse solo se cobra la inscripción. El cliente tiene 30 días para pagar la primera cuota. Si no paga en 5 días adicionales tras el vencimiento, aplica mora del 5% y suspensión.
+
+Para la Carrera de Piloto Profesional: menciona el total pero enfatiza que se paga curso por curso, sin plazo límite entre uno y otro, para que el cliente no se sienta abrumado.
+
+---
+
+## REQUISITOS POR CURSO
+
+PILOTO POR UN DÍA: mínimo 15 años. Menores necesitan padre/madre/tutor con acta de nacimiento original. No aplica para FUNDAPEC.
+
+PILOTO PRIVADO: mínimo 17 años. Requisitos BLOQUEANTES (si el usuario padece alguno, indicarle amablemente que no puede aplicar): daltonismo, hipertensión, diabetes tipo 1, antecedentes de infarto. Se recomienda inglés B1.
+
+HABILITACIÓN DE INSTRUMENTO: Licencia de Piloto Privado vigente + mínimo 50 horas de vuelo XC + Certificado Médico Aeronáutico de Segunda Clase.
+
+PILOTO COMERCIAL: mínimo 18 años + Licencia de Piloto Privado vigente + Certificado Médico de Primera Clase.
+
+CARRERA DE PILOTO PROFESIONAL: no tiene requisitos propios, aplican los de cada curso en su momento. Empieza desde Piloto Privado.
+
+HABILITACIÓN MONOMOTOR: Licencia de Piloto Privado vigente + Certificado Médico de Segunda Clase.
+
+DESPACHADOR DE VUELO: mínimo 21 años + título de bachiller. Se recomienda inglés B1.
+
+TRIPULANTE DE CABINA: EXCLUSIVO para ciudadanos dominicanos. Mínimo 17 años al iniciar y 18 al momento de evaluaciones ante el IDAC. Se recomienda inglés B1.
+
+Todos los cursos requieren: 2 fotos 2x2 fondo blanco, Certificado de No Antecedentes Penales, copia de cédula a color, formulario de inscripción y declaración jurada.
+
+---
+
+## MÉTODOS DE PAGO
+
+Tarjetas de crédito (incluyendo Amex), transferencias bancarias, efectivo, link de pago (RD$ o US$).
+
+Datos bancarios:
+Titular: ENALAS Entrenamientos Aeronáuticas Las Américas
+Banco: Banco Popular
+Cuenta DOP: 754895571
+Cuenta USD: 756750527
+RNC: 101-88246-8
+
+---
+
+## FINANCIAMIENTO
+
+FUNDAPEC financia el costo del curso y el estudiante paga en cuotas directamente a esa institución. Disponible para todos los cursos excepto Piloto por un Día. Recomendar consultar directamente con FUNDAPEC para condiciones específicas.
+
+---
+
+## REGLAS DE COMPORTAMIENTO
+
+Sé amable, cercano y natural, como si fueras un asesor humano real.
+Da respuestas cortas o medianas. No redactes párrafos largos innecesarios.
+Si el usuario pregunta por algo que no está disponible, ofrece contactar al 829-535-1000 o info@enalas.com.
+Cuando detectes interés real, pregunta el nombre y datos de contacto del interesado para dar seguimiento.
+Si el usuario comparte un número de teléfono, verifica que tenga entre 7 y 15 dígitos. Si parece incorrecto, pide confirmación antes de registrarlo.
+
+---
+
+## LÓGICA DE ESCALADO A ASESOR HUMANO
+
+Si el usuario pide hablar con una persona real: verificar que tengas su nombre y al menos un dato de contacto (teléfono o correo). Si no los tienes, pídelos primero con algo como: "Con gusto te conecto. ¿Me das tu nombre y un número o correo para que el asesor pueda contactarte?"
+
+Solo llama a scalate_to_human_support cuando se cumplan LAS TRES condiciones:
+1. El usuario ya proporcionó su nombre (mensaje anterior)
+2. El usuario ya proporcionó teléfono o correo (mensaje anterior)
+3. El usuario mostró interés concreto en un curso o pidió hablar con un asesor
+
+No escales en el mismo mensaje donde pides los datos. Llama a la tool en el mensaje siguiente tras recibir nombre + contacto completos.
+
+NUNCA llames a scalate_to_human_support solo porque no puedas responder algo. Si no tienes la info, consulta las herramientas de Airtable.
+
+NUNCA llames a scalate_to_human_support cuando el usuario se despide, dice gracias, o simplemente termina la conversación. Un mensaje de cierre NO es una solicitud de asesor humano.
+
+---
+
+## LÓGICA DE CIERRE DE CONVERSACIÓN (usuario satisfecho)
+
+Cuando detectes que el usuario ya obtuvo la información que buscaba y se retira (frases de despedida como "gracias", "ya entendí", "perfecto, hasta luego", "ok, eso era todo", etc.), llama a la herramienta mark_conversation_as_inactive con el número de teléfono del usuario.
+
+Esto evita que el sistema le envíe recordatorios molestos cuando ya resolvió su consulta.
+
+NO llames a mark_conversation_as_inactive si el usuario sigue con dudas o no ha dado señales claras de retirarse."""
+
+agent = Agent(model, system_prompt=system_prompt)
 
 
-class DB:
-    def __init__(self, url: str, key: str):
-        self.supabase: Client = create_client(url, key)
-        self.table_name = "leads"
+@agent.tool
+def get_table_information_airtable(ctx: RunContext, table_name: str) -> list:
+    """Obtiene información de las tablas de Airtable: RESUMEN, CONFIG, CURSOS, GRUPOS, DESCUENTOS"""
+    return get_table(table_name)
 
-    def create_new_lead(self, phone_number: str, status: str = "onboarding") -> dict:
-        new_lead = {
-            "user_phone_number": phone_number,
-            "status": status,
-            "conversation": [],
-            "ultimo_mensaje": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            "recordatorio_enviado": False,
-            "recordatorio_count": 0,
-        }
-        try:
-            result = self.supabase.table(self.table_name).insert(new_lead).execute()
-            print(f"✅ new lead inserted: {phone_number}")
-            return result.data[0]
-        except APIError as e:
-            if e.code == "23505" or "unique" in str(e).lower():
-                print(f"⚠️ lead with {phone_number} already exist. getting data...")
-                return self.get_lead(phone_number)
-            else:
-                raise e
 
-    def get_lead(self, phone_number: str) -> dict | None:
-        result = (
-            self.supabase.table(self.table_name)
-            .select("*")
-            .eq("user_phone_number", phone_number)
-            .execute()
-        )
-        return result.data[0] if result.data else None
+@agent.tool
+def mark_conversation_as_inactive(ctx: RunContext, lead_phone_number: str) -> str:
+    """
+    Marca al usuario como 'inactive' cuando ya obtuvo la información que buscaba y se retiró.
+    Esto evita que el sistema le envíe recordatorios automáticos innecesarios.
+    Úsala cuando el usuario se despida o deje claro que ya no tiene más preguntas.
+    """
+    try:
+        db.set_inactive(phone_number=lead_phone_number)
+        return "lead marcado como inactive: no recibirá más recordatorios en esta sesión"
+    except Exception as e:
+        return f"error marcando lead como inactive: {e}"
 
-    def update_status(self, phone_number: str, status: str) -> dict:
-        result = (
-            self.supabase.table(self.table_name)
-            .update({"status": status})
-            .eq("user_phone_number", phone_number)
-            .execute()
-        )
-        return result.data
 
-    def update_history_message(self, phone_number: str, user_message: str, ai_message: str) -> dict:
-        user = self.get_lead(phone_number)
-        if not user:
-            raise ValueError(f"lead not found with: {phone_number}")
-        actual_history_message = user.get("conversation")
-        if not isinstance(actual_history_message, list):
-            actual_history_message = []
-        new_messages = {
-            "user_message": user_message,
-            "ai_message": ai_message,
-            "date": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        }
-        actual_history_message.append(new_messages)
-
-        # Si el lead estaba inactive y volvió a escribir, lo reactivamos
-        current_status = user.get("status", "onboarding")
-        new_status = "onboarding" if current_status == "inactive" else current_status
-
-        result = (
-            self.supabase.table(self.table_name)
-            .update(
-                {
-                    "conversation": actual_history_message,
-                    "status": new_status,
-                    "ultimo_mensaje": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                    # Resetea flags cuando el usuario escribe activamente
-                    "recordatorio_enviado": False,
-                    "recordatorio_count": 0,
-                }
-            )
-            .eq("user_phone_number", phone_number)
-            .execute()
-        )
-        return result.data
-
-    def save_reminder_to_history(self, phone_number: str, ai_message: str) -> dict:
-        """
-        Guarda el mensaje de recordatorio en el historial SIN resetear recordatorio_enviado.
-        También actualiza ultimo_mensaje para que el scheduler no vuelva a disparar
-        inmediatamente en el próximo ciclo.
-        """
-        user = self.get_lead(phone_number)
-        if not user:
-            raise ValueError(f"lead not found with: {phone_number}")
-        actual_history = user.get("conversation")
-        if not isinstance(actual_history, list):
-            actual_history = []
-        actual_history.append(
-            {
-                "user_message": "[RECORDATORIO AUTOMÁTICO]",
-                "ai_message": ai_message,
-                "date": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            }
-        )
-        result = (
-            self.supabase.table(self.table_name)
-            .update(
-                {
-                    "conversation": actual_history,
-                    # Actualiza ultimo_mensaje para evitar re-trigger inmediato
-                    "ultimo_mensaje": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                }
-            )
-            .eq("user_phone_number", phone_number)
-            .execute()
-        )
-        return result.data
-
-    def get_chat_history(self, phone_number: str, limit: int = 10):
-        try:
-            response = (
-                self.supabase.table("leads")
-                .select("conversation")
-                .eq("user_phone_number", phone_number)
-                .maybe_single()
-                .execute()
-            )
-            if response.data and "conversation" in response.data:
-                history = response.data["conversation"]
-                # Filtra entradas de recordatorios automáticos para no confundir al agente
-                clean_history = [
-                    msg for msg in history
-                    if msg.get("user_message") != "[RECORDATORIO AUTOMÁTICO]"
-                ]
-                return clean_history[-limit:] if clean_history else []
-            return []
-        except Exception as e:
-            print(f"⚠️ Error al obtener el historial jsonb: {str(e)}")
-            return []
-
-    def reset_lead(self, phone_number: str) -> dict:
-        result = (
-            self.supabase.table(self.table_name)
-            .update(
-                {
-                    "status": "onboarding",
-                    "conversation": [],
-                    "ultimo_mensaje": None,
-                    "recordatorio_enviado": False,
-                    "recordatorio_count": 0,
-                }
-            )
-            .eq("user_phone_number", phone_number)
-            .execute()
-        )
-        print(f"🔄 Lead reseteado a onboarding: {phone_number}")
-        return result.data
-
-    def get_leads_para_recordatorio(self, antes_de: str) -> list:
-        """
-        Obtiene leads en onboarding que:
-        - No tienen recordatorio pendiente enviado
-        - Su último mensaje real fue antes del timestamp dado
-        - No han superado el límite de recordatorios por sesión
-        """
-        try:
-            result = (
-                self.supabase.table(self.table_name)
-                .select("user_phone_number, ultimo_mensaje, recordatorio_count")
-                .eq("status", "onboarding")
-                .eq("recordatorio_enviado", False)
-                .lt("ultimo_mensaje", antes_de)
-                .lt("recordatorio_count", MAX_RECORDATORIOS)
-                .not_.is_("ultimo_mensaje", "null")
-                .execute()
-            )
-            return result.data if result.data else []
-        except Exception as e:
-            print(f"⚠️ Error obteniendo leads para recordatorio: {str(e)}")
-            return []
-
-    def set_inactive(self, phone_number: str) -> dict:
-        """
-        Marca el lead como 'inactive': el usuario ya obtuvo lo que quería y se retiró.
-        El scheduler NO enviará recordatorios a leads con este status.
-        Se resetea a 'onboarding' si el usuario vuelve a escribir.
-        """
-        result = (
-            self.supabase.table(self.table_name)
-            .update({
-                "status": "inactive",
-                "recordatorio_enviado": True,  # Previene cualquier recordatorio pendiente
-                "recordatorio_count": MAX_RECORDATORIOS,  # Lleva el contador al máximo
-            })
-            .eq("user_phone_number", phone_number)
-            .execute()
-        )
-        print(f"😴 Lead marcado como inactive: {phone_number}")
-        return result.data
-
-    def marcar_recordatorio_enviado(self, phone_number: str) -> dict:
-        """Marca el recordatorio como enviado e incrementa el contador."""
-        lead = self.get_lead(phone_number)
-        current_count = lead.get("recordatorio_count", 0) if lead else 0
-        result = (
-            self.supabase.table(self.table_name)
-            .update(
-                {
-                    "recordatorio_enviado": True,
-                    "recordatorio_count": current_count + 1,
-                }
-            )
-            .eq("user_phone_number", phone_number)
-            .execute()
-        )
-        return result.data
+@agent.tool
+def scalate_to_human_support(ctx: RunContext, lead_phone_number: str, lead_uuid: str) -> str:
+    """Transfiere el lead a Atención al Cliente: actualiza estado y asigna equipo en Callbell"""
+    try:
+        db.update_status(phone_number=lead_phone_number, status="success")
+        callbell_ok = escalate_to_success(lead_uuid)
+        return f"lead moved to human support: {callbell_ok}"
+    except Exception as e:
+        return f"error moving lead to human support: {e}"
