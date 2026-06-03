@@ -33,8 +33,20 @@ async def verificar_recordatorios(db: DB):
         - datetime.timedelta(minutes=MINUTOS_INACTIVIDAD)
     ).isoformat()
 
+    # Evitar mandar dos recordatorios en menos de MINUTOS_INACTIVIDAD minutos
+    hace_n_min_recordatorio = (
+        datetime.datetime.now(datetime.timezone.utc)
+        - datetime.timedelta(minutes=MINUTOS_INACTIVIDAD)
+    ).isoformat()
+
     try:
-        leads = db.get_leads_para_recordatorio(hace_n_min)
+        leads_raw = db.get_leads_para_recordatorio(hace_n_min)
+        # Filtrar leads que ya recibieron un recordatorio muy reciente
+        leads = [
+            lead for lead in leads_raw
+            if not lead.get("ultimo_recordatorio")
+            or lead["ultimo_recordatorio"] < hace_n_min_recordatorio
+        ]
         if not leads:
             print("   No hay leads pendientes de recordatorio")
             return
