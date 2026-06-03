@@ -207,7 +207,15 @@ async def callbell_webhook(request: Request):
             print(f"😴 Usuario se despidió — lead marcado como inactive: {lead_phone}")
 
         print(f"🤖 Respuesta del agente: {ai_response.output[:100]}...")
-        await send_callbell_message(to_phone=lead_phone, text_content=ai_response.output)
+
+        # Limpiar markdown que el modelo pueda colar (asteriscos, negritas, etc.)
+        clean_response = ai_response.output
+        import re
+        clean_response = re.sub(r'\*+([^*]+)\*+', r'\1', clean_response)  # **texto** o *texto*
+        clean_response = re.sub(r'_+([^_]+)_+', r'\1', clean_response)    # __texto__ o _texto_
+        clean_response = re.sub(r'^#{1,6}\s+', '', clean_response, flags=re.MULTILINE)  # # headers
+
+        await send_callbell_message(to_phone=lead_phone, text_content=clean_response)
 
         return {"status": "success", "message": "Event processed"}
 
