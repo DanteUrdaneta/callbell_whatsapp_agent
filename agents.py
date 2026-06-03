@@ -1,7 +1,7 @@
 import os
 from pydantic_ai import Agent, RunContext
-from pydantic_ai.models.google import GoogleModel
-from pydantic_ai.providers.google import GoogleProvider
+from pydantic_ai.models.openai import OpenAIModel
+from pydantic_ai.providers.openai import OpenAIProvider
 from modules.tools import get_table
 from core.callbell import escalate_to_success
 from core.db import DB
@@ -14,9 +14,9 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
 db = DB(url=SUPABASE_URL, key=SUPABASE_KEY)
 
-model = GoogleModel(
-    "gemini-2.5-pro",
-    provider=GoogleProvider(api_key=os.environ.get("GEMINI_API_KEY")),
+model = OpenAIModel(
+    "gpt-4o-mini",
+    provider=OpenAIProvider(api_key=os.environ.get("OPENAI_API_KEY")),
 )
 
 system_prompt = """
