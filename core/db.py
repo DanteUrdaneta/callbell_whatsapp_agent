@@ -159,16 +159,14 @@ class DB:
     def get_leads_para_recordatorio(self, antes_de: str) -> list:
         """
         Obtiene leads en onboarding que:
-        - No tienen recordatorio pendiente enviado
         - Su último mensaje real fue antes del timestamp dado
         - No han superado el límite de recordatorios por sesión
         """
         try:
             result = (
                 self.supabase.table(self.table_name)
-                .select("user_phone_number, ultimo_mensaje, recordatorio_count")
+                .select("user_phone_number, ultimo_mensaje, recordatorio_count, ultimo_recordatorio")
                 .eq("status", "onboarding")
-                .eq("recordatorio_enviado", False)
                 .lt("ultimo_mensaje", antes_de)
                 .lt("recordatorio_count", MAX_RECORDATORIOS)
                 .not_.is_("ultimo_mensaje", "null")
@@ -199,15 +197,15 @@ class DB:
         return result.data
 
     def marcar_recordatorio_enviado(self, phone_number: str) -> dict:
-        """Marca el recordatorio como enviado e incrementa el contador."""
+        """Incrementa el contador de recordatorios y guarda el timestamp del último."""
         lead = self.get_lead(phone_number)
         current_count = lead.get("recordatorio_count", 0) if lead else 0
         result = (
             self.supabase.table(self.table_name)
             .update(
                 {
-                    "recordatorio_enviado": True,
                     "recordatorio_count": current_count + 1,
+                    "ultimo_recordatorio": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 }
             )
             .eq("user_phone_number", phone_number)
