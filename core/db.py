@@ -165,7 +165,7 @@ class DB:
         try:
             result = (
                 self.supabase.table(self.table_name)
-                .select("user_phone_number, ultimo_mensaje, recordatorio_count, ultimo_recordatorio")
+                .select("user_phone_number, ultimo_mensaje, recordatorio_count")
                 .eq("status", "onboarding")
                 .lt("ultimo_mensaje", antes_de)
                 .lt("recordatorio_count", MAX_RECORDATORIOS)
@@ -197,17 +197,12 @@ class DB:
         return result.data
 
     def marcar_recordatorio_enviado(self, phone_number: str) -> dict:
-        """Incrementa el contador de recordatorios y guarda el timestamp del último."""
+        """Incrementa el contador de recordatorios."""
         lead = self.get_lead(phone_number)
         current_count = lead.get("recordatorio_count", 0) if lead else 0
         result = (
             self.supabase.table(self.table_name)
-            .update(
-                {
-                    "recordatorio_count": current_count + 1,
-                    "ultimo_recordatorio": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                }
-            )
+            .update({"recordatorio_count": current_count + 1})
             .eq("user_phone_number", phone_number)
             .execute()
         )
