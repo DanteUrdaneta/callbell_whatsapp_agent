@@ -16,7 +16,6 @@ class DB:
             "status": status,
             "conversation": [],
             "ultimo_mensaje": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            "recordatorio_enviado": False,
             "recordatorio_count": 0,
         }
         try:
@@ -73,8 +72,6 @@ class DB:
                     "conversation": actual_history_message,
                     "status": new_status,
                     "ultimo_mensaje": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                    # Resetea flags cuando el usuario escribe activamente
-                    "recordatorio_enviado": False,
                     "recordatorio_count": 0,
                 }
             )
@@ -146,7 +143,6 @@ class DB:
                     "status": "onboarding",
                     "conversation": [],
                     "ultimo_mensaje": None,
-                    "recordatorio_enviado": False,
                     "recordatorio_count": 0,
                 }
             )
@@ -187,8 +183,7 @@ class DB:
             self.supabase.table(self.table_name)
             .update({
                 "status": "inactive",
-                "recordatorio_enviado": True,  # Previene cualquier recordatorio pendiente
-                "recordatorio_count": MAX_RECORDATORIOS,  # Lleva el contador al máximo
+                "recordatorio_count": MAX_RECORDATORIOS,
             })
             .eq("user_phone_number", phone_number)
             .execute()
