@@ -99,7 +99,10 @@ async def callbell_webhook(request: Request):
 
     # ── Asesor asignado/desasignado manualmente en Callbell ──
     if event == "contact_updated":
-        raw_phone = payload.get("phoneNumber", "")
+        print(f"📋 contact_updated payload: {payload}")  # Temporal para debug
+        raw_phone = payload.get("phoneNumber") or ""
+        if not raw_phone:
+            return JSONResponse(status_code=200, content={"status": "ok"})
         normalized = raw_phone.replace("+", "").replace(" ", "").replace("-", "")
         assigned_user = payload.get("assignedUser")
         if normalized:
