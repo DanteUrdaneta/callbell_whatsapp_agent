@@ -184,7 +184,7 @@ def build_system_prompt() -> str:
     return system_prompt.replace("{cotizaciones}", cotizaciones_section)
 
 
-agent = Agent(model, system_prompt=build_system_prompt)
+agent = Agent(model, system_prompt=build_system_prompt())
 
 
 @agent.tool
