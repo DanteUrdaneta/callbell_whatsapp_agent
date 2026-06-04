@@ -3,6 +3,7 @@ from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from modules.tools import get_table
+from modules.drive_reader import get_cotizaciones
 from core.callbell import escalate_to_success
 from core.db import DB
 from dotenv import load_dotenv
@@ -162,9 +163,28 @@ No escales en el mismo mensaje donde pides los datos. Llama a la tool en el mens
 
 NUNCA llames a scalate_to_human_support solo porque no puedas responder algo. Si no tienes la info, consulta las herramientas de Airtable.
 
-NUNCA llames a scalate_to_human_support cuando el usuario se despide, dice gracias, o simplemente termina la conversación. Un mensaje de cierre NO es una solicitud de asesor humano."""
+NUNCA llames a scalate_to_human_support cuando el usuario se despide, dice gracias, o simplemente termina la conversación. Un mensaje de cierre NO es una solicitud de asesor humano.
 
-agent = Agent(model, system_prompt=system_prompt)
+---
+
+## COTIZACIONES DETALLADAS DE CURSOS
+
+Las siguientes cotizaciones son documentos oficiales de ENALAS con el desglose completo de precios, requisitos y condiciones de cada curso. Úsalas cuando el usuario pregunte por detalles específicos de un curso (estructura de pagos, requisitos, condiciones, etc.). Para precios generales sigue usando Airtable.
+
+{cotizaciones}"""
+
+
+def build_system_prompt() -> str:
+    """Construye el system prompt inyectando las cotizaciones actuales de Drive."""
+    cotizaciones = get_cotizaciones()
+    if cotizaciones:
+        cotizaciones_section = cotizaciones
+    else:
+        cotizaciones_section = "(No se pudieron cargar las cotizaciones de Drive. Usa solo Airtable.)"
+    return system_prompt.replace("{cotizaciones}", cotizaciones_section)
+
+
+agent = Agent(model, system_prompt=build_system_prompt)
 
 
 @agent.tool
