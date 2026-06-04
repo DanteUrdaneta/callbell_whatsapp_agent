@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 from collections import deque
+import datetime
 from fastapi import FastAPI, Request, status, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -97,8 +98,35 @@ async def callbell_webhook(request: Request):
 
     print(f"📨 Evento recibido: event={event}")
 
-    # ── Ignorar contact_updated (Callbell lo dispara automáticamente en cada mensaje) ──
+    # ── Asesor asignado/desasignado en Callbell ──
+    # Solo reaccionar si NO llegó junto con un message_created (asignación automática)
+    # Las asignaciones automáticas de Callbell llegan simultáneamente con message_created
     if event == "contact_updated":
+        raw_phone = payload.get("phoneNumber") or ""
+        if not raw_phone:
+            return JSONResponse(status_code=200, content={"status": "ok"})
+        normalized = raw_phone.replace("+", "").replace(" ", "").replace("-", "")
+        assigned_user = payload.get("assignedUser")
+
+        if normalized and assigned_user:
+            lead = db.get_lead(normalized)
+            if lead:
+                ultimo_mensaje = lead.get("ultimo_mensaje")
+                ahora = datetime.datetime.now(datetime.timezone.utc)
+                # Si el último mensaje fue hace menos de 5 segundos, es asignación automática → ignorar
+                if ultimo_mensaje:
+                    ultimo_dt = datetime.datetime.fromisoformat(ultimo_mensaje.replace("Z", "+00:00"))
+                    segundos_diff = (ahora - ultimo_dt).total_seconds()
+                    if segundos_diff < 5:
+                        return JSONResponse(status_code=200, content={"status": "ok"})
+                # Asignación manual — pasar a success
+                db.update_status(phone_number=normalized, status="success")
+                print(f"👤 Asesor asignado manualmente ({assigned_user}) — lead pasado a success: {normalized}")
+        elif normalized and not assigned_user:
+            lead = db.get_lead(normalized)
+            if lead and lead.get("status") == "success":
+                db.update_status(phone_number=normalized, status="onboarding")
+                print(f"👤 Asesor desasignado — lead vuelto a onboarding: {normalized}")
         return JSONResponse(status_code=200, content={"status": "ok"})
 
     # ── Reset a onboarding cuando se cierra la conversación ──
