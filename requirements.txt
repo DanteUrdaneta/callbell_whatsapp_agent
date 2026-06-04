@@ -6,3 +6,6 @@ python-dotenv
 groq
 httpx
 apscheduler
+google-api-python-client
+google-auth
+pypdf
