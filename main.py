@@ -97,23 +97,8 @@ async def callbell_webhook(request: Request):
 
     print(f"📨 Evento recibido: event={event}")
 
-    # ── Asesor asignado/desasignado manualmente en Callbell ──
+    # ── Ignorar contact_updated (Callbell lo dispara automáticamente en cada mensaje) ──
     if event == "contact_updated":
-        print(f"📋 contact_updated payload: {payload}")  # Temporal para debug
-        raw_phone = payload.get("phoneNumber") or ""
-        if not raw_phone:
-            return JSONResponse(status_code=200, content={"status": "ok"})
-        normalized = raw_phone.replace("+", "").replace(" ", "").replace("-", "")
-        assigned_user = payload.get("assignedUser")
-        if normalized:
-            if assigned_user:
-                db.update_status(phone_number=normalized, status="success")
-                print(f"👤 Asesor asignado ({assigned_user}) — lead pasado a success: {normalized}")
-            else:
-                lead = db.get_lead(normalized)
-                if lead and lead.get("status") == "success":
-                    db.update_status(phone_number=normalized, status="onboarding")
-                    print(f"👤 Asesor desasignado — lead vuelto a onboarding: {normalized}")
         return JSONResponse(status_code=200, content={"status": "ok"})
 
     # ── Reset a onboarding cuando se cierra la conversación ──
