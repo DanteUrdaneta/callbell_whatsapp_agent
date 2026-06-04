@@ -2,6 +2,7 @@ import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from core.db import DB
 from core.callbell import send_callbell_message
+from modules.drive_reader import load_cotizaciones, REFRESH_HOURS
 
 # Minutos de inactividad antes de enviar el primer recordatorio
 MINUTOS_INACTIVIDAD = 3
@@ -15,11 +16,26 @@ def start_scheduler(db: DB):
         minutes=1,
         args=[db],
         id="recordatorios",
-        misfire_grace_time=30,  # Si el job se atrasa hasta 30s, igual lo ejecuta
+        misfire_grace_time=30,
+    )
+    scheduler.add_job(
+        _refresh_cotizaciones,
+        "interval",
+        hours=REFRESH_HOURS,
+        id="refresh_cotizaciones",
+        misfire_grace_time=60,
     )
     scheduler.start()
     print("⏰ Scheduler de recordatorios iniciado")
     return scheduler
+
+
+async def _refresh_cotizaciones():
+    """Refresca los PDFs de Drive en segundo plano."""
+    import asyncio
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, load_cotizaciones)
+    print("🔄 Cotizaciones de Drive refrescadas")
 
 
 async def verificar_recordatorios(db: DB):
