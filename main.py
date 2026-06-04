@@ -36,6 +36,11 @@ processed_messages: deque = deque(maxlen=MAX_CACHE_SIZE)
 # ── Lifespan (reemplaza el deprecado @app.on_event) ──────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Cargar cotizaciones de Drive al iniciar
+    import asyncio
+    from modules.drive_reader import load_cotizaciones
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, load_cotizaciones)
     start_scheduler(db)
     yield
 
