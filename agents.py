@@ -169,7 +169,7 @@ NUNCA llames a scalate_to_human_support cuando el usuario se despide, dice graci
 
 ## COTIZACIONES DETALLADAS DE CURSOS
 
-Las siguientes cotizaciones son documentos oficiales de ENALAS con el desglose completo de precios, requisitos y condiciones de cada curso. Úsalas cuando el usuario pregunte por detalles específicos de un curso (estructura de pagos, requisitos, condiciones, etc.). Para precios generales sigue usando Airtable.
+Los siguientes documentos son las cotizaciones oficiales de ENALAS. Contienen el desglose EXACTO de precios, materias, requisitos, condiciones de pago y horas de cada curso. Cuando el usuario pregunte por requisitos, materias, estructura de pagos, horas mínimas, condiciones o cualquier detalle específico de un curso, DEBES buscar la respuesta en estos documentos y responder con la información exacta que aparece en ellos. NO inventes ni supongas información que no esté escrita aquí.
 
 {cotizaciones}"""
 
