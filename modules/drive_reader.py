@@ -41,11 +41,17 @@ def _get_drive_service():
 def _extract_text_from_pdf(pdf_bytes: bytes) -> str:
     try:
         import pypdf
+        import re
         reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
-        text = ""
+        pages = []
         for page in reader.pages:
-            text += page.extract_text() or ""
-        return text.strip()
+            text = page.extract_text() or ""
+            # Limpiar espacios dobles que genera pypdf en PDFs escaneados
+            text = re.sub(r'  +', ' ', text)        # múltiples espacios → uno
+            text = re.sub(r' \n', '\n', text)        # espacio antes de salto → salto
+            text = re.sub(r'\n{3,}', '\n\n', text)  # más de 2 saltos → 2
+            pages.append(text.strip())
+        return "\n\n".join(pages).strip()
     except Exception as e:
         print(f"❌ Error extrayendo texto del PDF: {e}")
         return ""
