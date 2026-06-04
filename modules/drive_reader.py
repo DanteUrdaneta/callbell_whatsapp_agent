@@ -1,9 +1,3 @@
-"""
-drive_reader.py
-Lee todos los PDFs de una carpeta de Google Drive y extrae su texto.
-Se ejecuta al iniciar el servidor y se refresca cada REFRESH_HOURS horas.
-"""
-
 import os
 import io
 import json
