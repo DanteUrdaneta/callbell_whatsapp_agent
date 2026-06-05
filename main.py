@@ -100,6 +100,8 @@ async def serve_pdf(course_key: str):
     from fastapi.responses import Response
     from modules.drive_reader import _files_metadata, COURSE_FILE_KEYWORDS, _download_pdf_from_drive_by_id
 
+    course_key = urllib.parse.unquote(course_key)
+
     file_keyword = COURSE_FILE_KEYWORDS.get(course_key, "").upper()
     matched_name = None
     matched_id = None
@@ -317,7 +319,8 @@ async def callbell_webhook(request: Request):
                         if not real_name.lower().endswith(".pdf"):
                             real_name = f"{real_name}.pdf"
                         # Usar URL propia del servidor para garantizar nombre correcto
-                        self_url = f"{BASE_URL}/pdf/{course_key}"
+                        import urllib.parse as _up
+                        self_url = f"{BASE_URL}/pdf/{_up.quote(course_key)}"
                         await send_callbell_document(
                             to_phone=lead_phone,
                             file_url=self_url,
@@ -338,6 +341,14 @@ async def callbell_webhook(request: Request):
             print(f"😴 Usuario se despidió — lead marcado como inactive: {lead_phone}")
 
         print(f"🤖 Respuesta del agente: {ai_response.output[:100]}...")
+
+        # Si se envió PDF, mandar mensaje corto y no la respuesta del agente (que incluye datos del curso)
+        if pdf_enviado:
+            await send_callbell_message(
+                to_phone=lead_phone,
+                text_content="Te envié la cotización con todos los detalles. ¿Tienes alguna pregunta?"
+            )
+            return {"status": "success", "message": "Event processed"}
 
         # Limpiar markdown y LaTeX que el modelo pueda colar
         clean_response = ai_response.output
