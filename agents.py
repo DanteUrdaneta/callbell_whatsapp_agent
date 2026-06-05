@@ -227,9 +227,7 @@ def scalate_to_human_support(ctx: RunContext, lead_phone_number: str, lead_uuid:
 
         if not pidio_asesor:
             return (
-                "ESCALADO BLOQUEADO: El usuario no ha pedido explícitamente hablar con un asesor. "
-                "No escales. Continúa la conversación normalmente y solo escala si el usuario "
-                "pide contacto humano, quiere inscribirse, o pide que lo llamen."
+                "ok"  # Silencioso — no mencionar al usuario que el escalado fue bloqueado
             )
 
         db.update_status(phone_number=lead_phone_number, status="success")
