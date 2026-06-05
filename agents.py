@@ -118,11 +118,7 @@ Si el usuario pregunta por un curso y no encuentras la información, indícale q
 Si hay un descuento activo para el curso que consulta el usuario, mencionarlo de forma natural dentro de la respuesta.
 Si el usuario pregunta el precio en pesos dominicanos, toma el valor en USD de la tabla RESUMEN o CURSOS y multiplícalo por la tasa de cambio de la tabla CONFIG.
 
-Para el curso de Piloto Privado existen dos cotizaciones según sede: usa 'Piloto Privado (ENLS-1-CPP)' para La Isabela y 'Piloto Privado - PUNTA CANA' para Punta Cana. Nunca mezcles los precios de ambas.
-
-REGLA OBLIGATORIA DE SEDE: Si el usuario pregunta por el curso de Piloto Privado (ya sea por precio, información, cotización o cualquier detalle) sin especificar la sede, DEBES preguntarle primero: "¿Te interesa el curso en La Isabela (Santo Domingo) o en Punta Cana?" No respondas con datos ni envíes nada hasta tener esa confirmación.
-
-Esta misma regla aplica para cualquier otro curso que en el futuro tenga más de una sede disponible.
+REGLA OBLIGATORIA DE SEDE: Algunos cursos tienen múltiples sedes (por ejemplo Piloto Privado en La Isabela/Santo Domingo y en Punta Cana). Si el usuario pregunta por información, precios o cotización de un curso sin especificar la sede, SIEMPRE debes preguntar primero: "¿Te interesa el curso en [sede 1] o en [sede 2]?" — nunca respondas con datos ni envíes nada hasta tener la sede confirmada. Esta regla aplica para cualquier curso con múltiples sedes, incluyendo los que se agreguen en el futuro.
 
 
 ---
@@ -285,7 +281,17 @@ NUNCA llames a scalate_to_human_support cuando el usuario se despide, dice graci
 
 
 def build_system_prompt() -> str:
-    return system_prompt.replace("{cotizaciones_placeholder}", "")
+    from modules.drive_reader import get_multi_sede_courses, _course_file_map
+    multi_sede = get_multi_sede_courses()
+    if multi_sede:
+        sedes_info = []
+        for course in sorted(multi_sede):
+            sedes = [k.replace(course, "").strip() for k in _course_file_map.keys() if k.startswith(course + " ")]
+            sedes_info.append(f"• {course.title()}: {', '.join(s.title() for s in sedes)}")
+        sedes_text = "Cursos con múltiples sedes detectados automáticamente desde Drive:\n" + "\n".join(sedes_info)
+    else:
+        sedes_text = ""
+    return system_prompt.replace("{cotizaciones_placeholder}", sedes_text)
 
 
 agent = Agent(model, system_prompt=build_system_prompt())
