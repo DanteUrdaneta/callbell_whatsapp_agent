@@ -35,11 +35,12 @@ async def send_callbell_message(to_phone: str, text_content: str):
 
 
 async def send_callbell_document(to_phone: str, file_url: str, filename: str):
-    """Descarga el PDF y lo envía como documento con nombre correcto via Callbell."""
+    """Descarga el PDF de Drive, lo sube a hosting temporal con nombre correcto, y lo envía via Callbell."""
     import io
-    url = "https://api.callbell.eu/v1/messages/send"
+    callbell_url = "https://api.callbell.eu/v1/messages/send"
     headers = {
         "Authorization": f"Bearer {CALLBELL_API_KEY}",
+        "Content-Type": "application/json",
     }
 
     try:
@@ -50,35 +51,39 @@ async def send_callbell_document(to_phone: str, file_url: str, filename: str):
                 print(f"❌ No se pudo descargar el PDF: {pdf_response.status_code}")
                 return None
             pdf_bytes = pdf_response.content
+            print(f"📥 PDF descargado: {len(pdf_bytes)} bytes")
 
-        # Enviar como multipart con nombre correcto
+        # Subir a 0x0.st con el nombre correcto para tener una URL limpia
         async with httpx.AsyncClient(timeout=30) as client:
-            files = {
-                "file": (filename, io.BytesIO(pdf_bytes), "application/pdf"),
+            upload_response = await client.post(
+                "https://0x0.st",
+                files={"file": (filename, io.BytesIO(pdf_bytes), "application/pdf")},
+            )
+            if upload_response.status_code == 200:
+                hosted_url = upload_response.text.strip()
+                print(f"☁️ PDF subido a hosting temporal: {hosted_url}")
+            else:
+                # Si falla el upload, usar URL de Drive directamente
+                hosted_url = file_url
+                print(f"⚠️ Upload temporal falló, usando URL de Drive")
+
+        # Enviar a Callbell con la URL hosteada
+        payload = {
+            "to": to_phone,
+            "from": "whatsapp",
+            "type": "document",
+            "content": {
+                "url": hosted_url,
+                "name": filename,
             }
-            data = {
-                "to": to_phone,
-                "from": "whatsapp",
-                "type": "document",
-            }
-            response = await client.post(url, headers=headers, data=data, files=files)
+        }
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(callbell_url, headers=headers, json=payload)
             if response.status_code in [200, 201]:
                 print(f"✅ Documento enviado a {to_phone}: {filename}")
                 return response.json()
             else:
                 print(f"❌ Error enviando documento: {response.status_code} - {response.text}")
-                # Fallback: intentar con URL directa
-                payload = {
-                    "to": to_phone,
-                    "from": "whatsapp",
-                    "type": "document",
-                    "content": {"url": file_url, "name": filename},
-                }
-                headers["Content-Type"] = "application/json"
-                response2 = await client.post(url, headers=headers, json=payload)
-                if response2.status_code in [200, 201]:
-                    print(f"✅ Documento enviado (fallback URL) a {to_phone}: {filename}")
-                    return response2.json()
                 return None
     except Exception as e:
         print(f"❌ HTTP Error enviando documento: {str(e)}")
