@@ -230,19 +230,33 @@ async def callbell_webhook(request: Request):
                 ai_message=ai_response.output,
             )
 
-        # Enviar PDF solo cuando el usuario pide explícitamente la cotización
+        # Enviar PDF cuando el usuario acepta la oferta o lo pide explícitamente
         COTIZACION_KEYWORDS = [
             "cotizacion", "cotización", "pdf", "documento",
             "envía el documento", "envia el documento",
             "manda el pdf", "quiero el pdf", "dame el pdf",
             "informacion completa", "información completa",
+            "sí", "si", "claro", "sí por favor", "si por favor",
+            "mándamelo", "mandamelo", "mándala", "mandala",
+            "sí quiero", "si quiero", "me la mandas", "envíala", "enviala",
         ]
         pide_cotizacion = any(kw in user_message.lower() for kw in COTIZACION_KEYWORDS)
 
         if pide_cotizacion:
             from modules.drive_reader import detect_course_from_message, get_pdf_url_for_course
             from core.callbell import send_callbell_document
+
+            # Buscar el curso en el mensaje actual o en el historial reciente
             course_key = detect_course_from_message(user_message.lower())
+            if not course_key:
+                # Si el usuario solo dijo "sí", buscar el curso en los últimos mensajes del bot
+                db_history_check = db.get_chat_history(phone_number=lead_phone, limit=5)
+                for msg in reversed(db_history_check or []):
+                    ai_msg = msg.get("ai_message", "") or ""
+                    course_key = detect_course_from_message(ai_msg.lower())
+                    if course_key:
+                        break
+
             if course_key:
                 # Verificar que no se haya enviado ya en los últimos mensajes
                 db_history_check = db.get_chat_history(phone_number=lead_phone, limit=10)
