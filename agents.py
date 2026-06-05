@@ -120,6 +120,10 @@ Si el usuario pregunta el precio en pesos dominicanos, toma el valor en USD de l
 
 Para el curso de Piloto Privado existen dos cotizaciones según sede: usa 'Piloto Privado (ENLS-1-CPP)' para La Isabela y 'Piloto Privado - PUNTA CANA' para Punta Cana. Nunca mezcles los precios de ambas.
 
+REGLA OBLIGATORIA DE SEDE: Si el usuario pregunta por el curso de Piloto Privado (ya sea por precio, información, cotización o cualquier detalle) sin especificar la sede, DEBES preguntarle primero: "¿Te interesa el curso en La Isabela (Santo Domingo) o en Punta Cana?" No respondas con datos ni envíes nada hasta tener esa confirmación.
+
+Esta misma regla aplica para cualquier otro curso que en el futuro tenga más de una sede disponible.
+
 
 ---
 
