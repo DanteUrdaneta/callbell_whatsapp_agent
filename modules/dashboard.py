@@ -38,6 +38,11 @@ def update_dashboard(db) -> None:
         api   = Api(AIRTABLE_ACCESS_TOKEN)
         table = api.table(AIRTABLE_DASHBOARD_BASE, DASHBOARD_TABLE_NAME)
 
+        # Debug: imprimir campos reales del record
+        records = table.all()
+        if records:
+            print(f"🔍 Campos reales en Airtable: {list(records[0]['fields'].keys())}")
+
         fields = {
             "numero de usuarios activos":  activos,
             "numero de usuarios exitosos": exitosos,
