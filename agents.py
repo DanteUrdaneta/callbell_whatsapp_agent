@@ -3,7 +3,6 @@ from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from modules.tools import get_table
-from modules.drive_reader import get_cotizaciones
 from core.callbell import escalate_to_success
 from core.db import DB
 from dotenv import load_dotenv
@@ -148,9 +147,7 @@ Si el usuario pregunta por algo que no está disponible, ofrece contactar al 829
 Cuando detectes interés real, pregunta el nombre y datos de contacto del interesado para dar seguimiento.
 Si el usuario comparte un número de teléfono, verifica que tenga entre 7 y 15 dígitos. Si parece incorrecto, pide confirmación antes de registrarlo.
 
-Cuando respondas sobre los detalles, precios o información de un curso específico, SIEMPRE termina tu respuesta ofreciendo la cotización en PDF con una frase como: "¿Te gustaría recibir la cotización completa en PDF?" o "¿Quieres que te envíe la cotización oficial en PDF?"
-
-Cuando el usuario acepte recibir el PDF (responda "sí", "claro", "sí por favor", "mándamelo", etc.), responde con un mensaje muy corto como "Aquí tienes la cotización:" o "Te la envío ahora." — el PDF se enviará automáticamente junto con tu mensaje.
+Cuando respondas sobre los detalles, precios, requisitos, estructura de pagos o cualquier dato específico de un curso, NUNCA escribas los datos en el mensaje. En su lugar responde únicamente con una frase corta como "Aquí tienes la cotización oficial:" o "Te envío la cotización con todos los detalles." — el PDF se enviará automáticamente. No incluyas precios, horas, ni datos del curso en el texto del mensaje bajo ninguna circunstancia.
 
 ---
 
@@ -173,25 +170,13 @@ NUNCA llames a scalate_to_human_support cuando el usuario se despide, dice graci
 
 ## COTIZACIONES DETALLADAS DE CURSOS
 
-Los siguientes documentos son las cotizaciones oficiales de ENALAS. Contienen el desglose EXACTO de precios, materias, requisitos, condiciones de pago y horas de cada curso.
+Los PDFs de cotización se envían automáticamente cuando el usuario pregunta por precios, detalles o requisitos de un curso. No necesitas leer ni repetir su contenido — el sistema se encarga de enviar el archivo correcto.
 
-REGLAS para usar estas cotizaciones:
-1. Cuando el usuario pregunte por requisitos, materias, horas, condiciones o estructura de pagos, copia la información EXACTAMENTE como aparece en el documento. NO parafrasees ni agregues información que no esté escrita.
-2. Si el documento lista requisitos con viñetas, reprodúcelos tal cual usando el símbolo •.
-3. NUNCA inventes requisitos, materias o condiciones que no estén en el documento.
-4. Si no encuentras la información en ningún documento, dilo claramente.
-
-{cotizaciones}"""
+{cotizaciones_placeholder}"""
 
 
 def build_system_prompt() -> str:
-    """Construye el system prompt inyectando las cotizaciones actuales de Drive."""
-    cotizaciones = get_cotizaciones()
-    if cotizaciones:
-        cotizaciones_section = cotizaciones
-    else:
-        cotizaciones_section = "(No se pudieron cargar las cotizaciones de Drive. Usa solo Airtable.)"
-    return system_prompt.replace("{cotizaciones}", cotizaciones_section)
+    return system_prompt.replace("{cotizaciones_placeholder}", "")
 
 
 agent = Agent(model, system_prompt=build_system_prompt())
