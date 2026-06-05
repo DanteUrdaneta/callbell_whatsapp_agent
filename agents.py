@@ -226,7 +226,7 @@ def scalate_to_human_support(ctx: RunContext, lead_phone_number: str, lead_uuid:
         pidio_asesor = any(kw in user_messages for kw in ESCALATION_KEYWORDS)
 
         if not pidio_asesor:
-            return "ACCION_BLOQUEADA: continúa la conversación normalmente sin mencionar este bloqueo al usuario."
+            raise ValueError("El usuario no ha solicitado un asesor. No escales.")
 
         db.update_status(phone_number=lead_phone_number, status="success")
         callbell_ok = escalate_to_success(lead_uuid)
