@@ -1,9 +1,3 @@
-"""
-dashboard.py
-Actualiza la tabla Dashboard en Airtable con métricas en tiempo real
-obtenidas desde Supabase.
-"""
-
 import os
 from dotenv import load_dotenv
 
@@ -12,6 +6,12 @@ load_dotenv()
 AIRTABLE_ACCESS_TOKEN   = os.environ.get("AIRTABLE_ACCESS_TOKEN")
 AIRTABLE_DASHBOARD_BASE = os.environ.get("AIRTABLE_DASHBOARD_BASE_ID")
 DASHBOARD_TABLE_NAME    = "Dashboard"
+
+# Nombres exactos de los campos en Airtable (deben coincidir al 100%)
+FIELD_ACTIVOS    = "numero de usuarios activos"
+FIELD_EXITOSOS   = "numero de usuarios exitosos"
+FIELD_TOTAL      = "conversaciones totales"
+FIELD_TOKENS     = "tokens totales"
 
 
 def update_dashboard(db) -> None:
@@ -34,45 +34,30 @@ def update_dashboard(db) -> None:
         exitosos       = sum(1 for r in rows if r.get("status") == "success")
         tokens_totales = sum((r.get("tokens_used") or 0) for r in rows)
 
+        print(f"📊 Métricas calculadas: activos={activos}, exitosos={exitosos}, total={total}, tokens={tokens_totales}")
+
         # ── Conectar a Airtable ───────────────────────────────────────────
         api   = Api(AIRTABLE_ACCESS_TOKEN)
         table = api.table(AIRTABLE_DASHBOARD_BASE, DASHBOARD_TABLE_NAME)
 
-        # ── Leer nombres reales de campos desde el schema ─────────────────
-        schema       = table.schema()
-        field_names  = [f.name for f in schema.fields]
-        print(f"🔍 Campos reales en Airtable: {field_names}")
-
-        # Mapeo flexible: busca el campo por palabras clave (case-insensitive)
-        def find_field(keywords):
-            for name in field_names:
-                name_lower = name.lower()
-                if all(k in name_lower for k in keywords):
-                    return name
-            return None
-
-        campo_activos    = find_field(["activos"])        or "numero de usuarios activos"
-        campo_exitosos   = find_field(["exitosos"])       or "numero de usuarios exitosos"
-        campo_total      = find_field(["conversaciones"]) or "conversaciones totales"
-        campo_tokens     = find_field(["tokens"])         or "tokens totales"
-
-        print(f"📌 Usando campos: '{campo_activos}' | '{campo_exitosos}' | '{campo_total}' | '{campo_tokens}'")
-
         fields = {
-            campo_activos:  activos,
-            campo_exitosos: exitosos,
-            campo_total:    total,
-            campo_tokens:   tokens_totales,
+            FIELD_ACTIVOS:  activos,
+            FIELD_EXITOSOS: exitosos,
+            FIELD_TOTAL:    total,
+            FIELD_TOKENS:   tokens_totales,
         }
 
-        # ── Actualizar o crear el record ──────────────────────────────────
+        # ── Leer campos reales del primer record para debug ───────────────
         records = table.all()
         if records:
+            real_fields = list(records[0].get("fields", {}).keys())
+            print(f"🔍 Campos reales en Airtable: {real_fields}")
             table.update(records[0]["id"], fields)
         else:
+            print(f"🔍 No hay records, creando uno nuevo...")
             table.create(fields)
 
-        print(f"📊 Dashboard actualizado: activos={activos}, exitosos={exitosos}, total={total}, tokens={tokens_totales}")
+        print(f"✅ Dashboard actualizado correctamente")
 
     except Exception as e:
         print(f"⚠️ Error actualizando dashboard: {e}")
