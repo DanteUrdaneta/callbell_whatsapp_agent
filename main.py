@@ -98,21 +98,15 @@ async def serve_pdf(request: Request, course_key: str):
     """Sirve el PDF de un curso directamente desde el cache en memoria."""
     import urllib.parse
     from fastapi.responses import Response
-    from modules.drive_reader import _files_metadata, COURSE_FILE_KEYWORDS, _download_pdf_from_drive_by_id
+    from modules.drive_reader import get_pdf_url_for_course, _download_pdf_from_drive_by_id
 
     course_key = urllib.parse.unquote(course_key)
 
-    file_keyword = COURSE_FILE_KEYWORDS.get(course_key, "").upper()
-    matched_name = None
-    matched_id = None
-    for filename, file_id in _files_metadata.items():
-        if file_keyword and file_keyword.upper() in filename.upper():
-            matched_name = filename
-            matched_id = file_id
-            break
-
-    if not matched_id:
+    pdf_info = get_pdf_url_for_course(course_key)
+    if not pdf_info:
         raise HTTPException(status_code=404, detail="Curso no encontrado")
+
+    _, matched_name, matched_id = pdf_info
 
     import re as _re
     clean = _re.sub(r'^\d+\s+', '', matched_name.strip())
@@ -295,7 +289,8 @@ async def callbell_webhook(request: Request):
         respuesta_pdf = None  # mensaje a enviar en lugar del agente cuando aplique
 
         if pide_cotizacion:
-            from modules.drive_reader import detect_course_from_message, get_pdf_url_for_course
+            from modules.drive_reader import detect_course_from_message, get_pdf_url_for_course, get_multi_sede_courses
+            MULTI_SEDE_COURSES = get_multi_sede_courses()
             from core.callbell import send_callbell_document
 
             # Buscar el curso en el mensaje actual
@@ -313,9 +308,15 @@ async def callbell_webhook(request: Request):
                     last_ai = (db_history_check[-1].get("ai_message", "") or "")
                     course_key = detect_course_from_message(last_ai.lower())
 
+            # Si el curso detectado tiene múltiples sedes y no se especificó cuál,
+            # dejar que el agente pregunte — no enviar PDF todavía
+            if course_key in MULTI_SEDE_COURSES:
+                course_key = None
+                respuesta_pdf = None  # el agente ya preguntó o preguntará la sede
+
             if not course_key:
-                # No se detectó el curso — preguntarle al usuario
-                respuesta_pdf = "¿De cuál curso quieres la cotización?"
+                # No se detectó el curso (o es multi-sede sin especificar) — el agente maneja la respuesta
+                pass
             else:
                 pdf_info = get_pdf_url_for_course(course_key)
                 if not pdf_info:
