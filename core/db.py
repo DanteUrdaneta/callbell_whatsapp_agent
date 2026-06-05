@@ -202,3 +202,15 @@ class DB:
             .execute()
         )
         return result.data
+
+    def add_tokens(self, phone_number: str, tokens: int) -> dict:
+        """Suma los tokens usados en esta llamada al acumulado del lead."""
+        lead = self.get_lead(phone_number)
+        current_tokens = lead.get("tokens_used", 0) if lead else 0
+        result = (
+            self.supabase.table(self.table_name)
+            .update({"tokens_used": (current_tokens or 0) + tokens})
+            .eq("user_phone_number", phone_number)
+            .execute()
+        )
+        return result.data
