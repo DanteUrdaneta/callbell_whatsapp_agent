@@ -93,8 +93,8 @@ async def index():
     return "hello world"
 
 
-@app.get("/pdf/{course_key:path}")
-async def serve_pdf(course_key: str):
+@app.api_route("/pdf/{course_key:path}", methods=["GET", "HEAD"])
+async def serve_pdf(request: Request, course_key: str):
     """Sirve el PDF de un curso directamente desde el cache en memoria."""
     import urllib.parse
     from fastapi.responses import Response
@@ -114,14 +114,22 @@ async def serve_pdf(course_key: str):
     if not matched_id:
         raise HTTPException(status_code=404, detail="Curso no encontrado")
 
-    pdf_bytes = _download_pdf_from_drive_by_id(matched_id)
-    if not pdf_bytes:
-        raise HTTPException(status_code=500, detail="Error descargando PDF")
-
     import re as _re
     clean = _re.sub(r'^\d+\s+', '', matched_name.strip())
     if not clean.lower().endswith(".pdf"):
         clean = f"{clean}.pdf"
+
+    # HEAD request: solo confirmar que existe, sin descargar el PDF
+    if request.method == "HEAD":
+        return Response(
+            content=b"",
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{clean}"'},
+        )
+
+    pdf_bytes = _download_pdf_from_drive_by_id(matched_id)
+    if not pdf_bytes:
+        raise HTTPException(status_code=500, detail="Error descargando PDF")
 
     return Response(
         content=pdf_bytes,
