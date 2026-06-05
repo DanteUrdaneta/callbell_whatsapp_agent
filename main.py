@@ -299,12 +299,11 @@ async def callbell_webhook(request: Request):
             # Buscar el curso en el mensaje actual o en el historial reciente
             course_key = detect_course_from_message(user_message.lower())
             if not course_key:
-                # Buscar el curso en los últimos mensajes (del bot y del usuario)
-                db_history_check = db.get_chat_history(phone_number=lead_phone, limit=5)
+                # Buscar solo en los 2 mensajes de usuario más recientes (no en ai_message que puede mencionar varios cursos)
+                db_history_check = db.get_chat_history(phone_number=lead_phone, limit=2)
                 for msg in reversed(db_history_check or []):
-                    ai_msg = msg.get("ai_message", "") or ""
                     user_msg = msg.get("user_message", "") or ""
-                    course_key = detect_course_from_message(ai_msg.lower()) or detect_course_from_message(user_msg.lower())
+                    course_key = detect_course_from_message(user_msg.lower())
                     if course_key:
                         break
 
