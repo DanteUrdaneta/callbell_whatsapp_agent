@@ -386,7 +386,7 @@ async def callbell_webhook(request: Request):
 
         # Calcular tokens usados en esta llamada
         try:
-            usage = ai_response.usage()
+            usage = ai_response.usage
             tokens_this_call = usage.total_tokens or 0
             db.add_tokens(phone_number=lead_phone, tokens=tokens_this_call)
             print(f"🔢 Tokens usados: {tokens_this_call}")
