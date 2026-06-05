@@ -227,7 +227,26 @@ async def callbell_webhook(request: Request):
                 ai_message=ai_response.output,
             )
 
-        # Detectar despedida del usuario para evitar recordatorios innecesarios
+        # Detectar si el usuario está pidiendo cotización de un curso y enviar el PDF
+        COTIZACION_KEYWORDS = ["cotizacion", "cotización", "pdf", "documento", "detalles", "requisitos",
+                               "cuánto cuesta", "cuanto cuesta", "precio", "inscripcion", "inscripción",
+                               "informacion completa", "información completa", "más información", "mas informacion"]
+        pide_cotizacion = any(kw in user_message.lower() for kw in COTIZACION_KEYWORDS)
+
+        if pide_cotizacion:
+            from modules.drive_reader import detect_course_from_message, get_pdf_url_for_course
+            from core.callbell import send_callbell_document
+            course_key = detect_course_from_message(user_message.lower())
+            if course_key:
+                pdf_info = get_pdf_url_for_course(course_key)
+                if pdf_info:
+                    pdf_url, pdf_name = pdf_info
+                    await send_callbell_document(
+                        to_phone=lead_phone,
+                        file_url=pdf_url,
+                        filename=pdf_name,
+                    )
+                    print(f"📎 PDF de cotización enviado: {pdf_name}")
         FAREWELL_KEYWORDS = [
             "gracias", "hasta luego", "hasta pronto", "adiós", "adios",
             "bye", "chao", "chau", "ok gracias", "muchas gracias",
