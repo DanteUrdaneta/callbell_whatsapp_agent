@@ -1,3 +1,19 @@
+"""
+drive_reader.py
+Lee todos los PDFs de una carpeta de Google Drive y construye el catálogo
+de cursos dinámicamente desde los nombres de archivo.
+
+CONVENCIÓN DE NOMBRES EN GOOGLE DRIVE:
+  - Curso sin sede:    "Piloto Comercial.pdf"
+  - Curso con sede:    "Piloto Privado - Punta Cana.pdf"
+                       "Piloto Privado - Santo Domingo.pdf"
+  - Prefijo numérico ignorado: "01 Piloto Comercial.pdf" → mismo resultado
+  - Códigos entre paréntesis ignorados: "Piloto Comercial (ENLS-1-CPC).pdf" → mismo resultado
+
+El cliente solo sube o renombra PDFs en Drive. El sistema detecta
+automáticamente cursos nuevos, sedes y multi-sede sin tocar código.
+"""
+
 import os
 import io
 import re
@@ -13,19 +29,11 @@ FOLDER_ID    = "1z2HYoD_sNI9Iyh29Y1E_uw4GwY9K8Bb1"
 REFRESH_HOURS = 6
 
 _cotizaciones_cache: Optional[str] = None
-# Cache de metadatos: {nombre_archivo: file_id}
 _files_metadata: dict = {}
-# Cache de bytes de PDFs: {file_id: bytes}
 _pdf_bytes_cache: dict = {}
-
-# Catálogo dinámico construido al cargar los PDFs de Drive:
-#   _course_file_map:  { course_key: nombre_archivo }
-#   _multi_sede:       { course_key_generico, ... }  (piloto privado, etc.)
 _course_file_map: dict = {}
 _multi_sede: set = set()
 
-
-# ── Helpers de normalización ────────────────────────────────────────────────
 
 def _normalize(text: str) -> str:
     """Quita tildes, pasa a minúsculas y elimina caracteres no alfanuméricos."""
@@ -39,15 +47,19 @@ def _normalize(text: str) -> str:
 def _parse_pdf_name(filename: str):
     """
     Dado el nombre de un PDF retorna (course_key, sede_key).
+    Ignora prefijos numéricos y códigos entre paréntesis como (ENLS-1-CPP).
 
-    Convención:
-      'Piloto Privado - Punta Cana.pdf'    -> ('piloto privado', 'punta cana')
-      'Piloto Privado - Santo Domingo.pdf' -> ('piloto privado', 'santo domingo')
-      'Piloto Comercial.pdf'               -> ('piloto comercial', None)
-      '01 Tripulante de Cabina.pdf'        -> ('tripulante de cabina', None)
+    Ejemplos:
+      '08 Cotizacion de Curso Piloto Privado - PUNTA CANA.pdf'
+        -> ('cotizacion de curso piloto privado', 'punta cana')
+      '08 Cotizacion de Curso Piloto Privado - Santo Domingo(ENLS-1-CPP).pdf'
+        -> ('cotizacion de curso piloto privado', 'santo domingo')
+      '11 Cotizacion de Curso Piloto Comercial (ENLS-1-CPC).pdf'
+        -> ('cotizacion de curso piloto comercial', None)
     """
-    name = re.sub(r"^\d+\s+", "", filename.strip())       # quitar prefijo numérico
+    name = re.sub(r"^\d+\s+", "", filename.strip())           # quitar prefijo numérico
     name = re.sub(r"\.pdf$", "", name, flags=re.IGNORECASE).strip()
+    name = re.sub(r"\s*\([^)]*\)", "", name).strip()          # quitar (ENLS-1-CPP) etc.
 
     if " - " in name:
         parts = name.split(" - ", 1)
@@ -63,12 +75,11 @@ def _build_catalog(filenames: list[str]):
     """
     global _course_file_map, _multi_sede
 
-    parsed = []  # [(course_key, sede_key, filename)]
+    parsed = []
     for fn in filenames:
         course_key, sede_key = _parse_pdf_name(fn)
         parsed.append((course_key, sede_key, fn))
 
-    # Detectar cursos con múltiples sedes
     sedes_por_curso = defaultdict(list)
     for course_key, sede_key, _ in parsed:
         if sede_key:
@@ -76,7 +87,6 @@ def _build_catalog(filenames: list[str]):
 
     _multi_sede = {k for k, v in sedes_por_curso.items() if len(v) > 1}
 
-    # Construir mapa completo: clave específica + clave genérica para multi-sede
     new_map = {}
     for course_key, sede_key, fn in parsed:
         if sede_key:
@@ -88,8 +98,6 @@ def _build_catalog(filenames: list[str]):
     print(f"📚 Catálogo dinámico: {list(_course_file_map.keys())}")
     print(f"🏙️  Multi-sede: {_multi_sede}")
 
-
-# ── API pública ──────────────────────────────────────────────────────────────
 
 def get_multi_sede_courses() -> set:
     """Retorna el set de course_keys genéricos con múltiples sedes."""
@@ -104,21 +112,20 @@ def detect_course_from_message(message: str) -> str | None:
     """
     msg = _normalize(message)
 
-    # Primero buscar match con sede específica (claves más largas)
     for key in sorted(_course_file_map.keys(), key=len, reverse=True):
         words = key.split()
         if all(w in msg for w in words):
-            # Verificar si este key tiene sede (es decir, pertenece a un curso multi-sede)
+            # Verificar si pertenece a un curso multi-sede
             for base_course in _multi_sede:
                 if key.startswith(base_course + " "):
-                    # Solo retornar la clave con sede si el mensaje menciona explícitamente la sede
+                    # Solo retornar clave con sede si el mensaje menciona la sede explícitamente
                     sede_part = _normalize(key[len(base_course):].strip())
                     sede_words = sede_part.split()
                     if all(w in msg for w in sede_words):
-                        return key  # mensaje menciona la sede → retornar clave específica
+                        return key  # mensaje menciona la sede → clave específica
                     else:
-                        return base_course  # mensaje no menciona sede → retornar genérico
-            return key  # curso sin multi-sede, retornar normal
+                        return base_course  # no menciona sede → genérico
+            return key  # curso sin multi-sede
     return None
 
 
@@ -135,7 +142,6 @@ def get_pdf_url_for_course(course_key: str):
 
     file_id = _files_metadata.get(filename)
     if not file_id:
-        # Buscar por coincidencia parcial por si el nombre tiene leve variación
         fn_norm = _normalize(filename)
         for fn, fid in _files_metadata.items():
             if _normalize(fn) == fn_norm:
@@ -148,8 +154,6 @@ def get_pdf_url_for_course(course_key: str):
     url = f"https://drive.google.com/uc?export=download&id={file_id}"
     return url, filename, file_id
 
-
-# ── Google Drive ─────────────────────────────────────────────────────────────
 
 def _get_drive_service():
     try:
@@ -229,13 +233,11 @@ def load_cotizaciones() -> str:
 
         print(f"📄 Encontrados {len(files)} PDFs: {[f['name'] for f in files]}")
 
-        # Actualizar metadata y construir catálogo dinámico
         for file in files:
             _files_metadata[file["name"]] = file["id"]
 
         _build_catalog(list(_files_metadata.keys()))
 
-        # Leer texto de cada PDF
         all_text = []
         for file in files:
             try:
