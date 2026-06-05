@@ -25,6 +25,13 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 if not SUPABASE_URL or not SUPABASE_KEY:
     raise ValueError("❌ Error: SUPABASE_URL or SUPABASE_KEY not exist in .env")
 
+# URL pública del servidor (Railway la expone como RAILWAY_PUBLIC_DOMAIN)
+BASE_URL = os.environ.get("BASE_URL") or (
+    f"https://{os.environ['RAILWAY_PUBLIC_DOMAIN']}"
+    if os.environ.get("RAILWAY_PUBLIC_DOMAIN")
+    else "http://localhost:8000"
+)
+
 groq_client = AsyncGroq(api_key=os.environ.get("GROQ_API_KEY"))
 db = DB(url=SUPABASE_URL, key=SUPABASE_KEY)
 
@@ -84,6 +91,41 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 @app.get("/")
 async def index():
     return "hello world"
+
+
+@app.get("/pdf/{course_key:path}")
+async def serve_pdf(course_key: str):
+    """Sirve el PDF de un curso directamente desde el cache en memoria."""
+    import urllib.parse
+    from fastapi.responses import Response
+    from modules.drive_reader import _files_metadata, COURSE_FILE_KEYWORDS, _download_pdf_from_drive_by_id
+
+    file_keyword = COURSE_FILE_KEYWORDS.get(course_key, "").upper()
+    matched_name = None
+    matched_id = None
+    for filename, file_id in _files_metadata.items():
+        if file_keyword and file_keyword.upper() in filename.upper():
+            matched_name = filename
+            matched_id = file_id
+            break
+
+    if not matched_id:
+        raise HTTPException(status_code=404, detail="Curso no encontrado")
+
+    pdf_bytes = _download_pdf_from_drive_by_id(matched_id)
+    if not pdf_bytes:
+        raise HTTPException(status_code=500, detail="Error descargando PDF")
+
+    import re as _re
+    clean = _re.sub(r'^\d+\s+', '', matched_name.strip())
+    if not clean.lower().endswith(".pdf"):
+        clean = f"{clean}.pdf"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{clean}"'},
+    )
 
 
 @app.get("/webhook/callbell")
@@ -270,18 +312,18 @@ async def callbell_webhook(request: Request):
                     pdf_info = get_pdf_url_for_course(course_key)
                     if pdf_info:
                         pdf_url, pdf_name, pdf_file_id = pdf_info
-                        # Quitar prefijo numérico tipo "08 ", "10 ", "11 " del nombre
                         import re as _re
                         real_name = _re.sub(r'^\d+\s+', '', pdf_name.strip())
                         if not real_name.lower().endswith(".pdf"):
                             real_name = f"{real_name}.pdf"
+                        # Usar URL propia del servidor para garantizar nombre correcto
+                        self_url = f"{BASE_URL}/pdf/{course_key}"
                         await send_callbell_document(
                             to_phone=lead_phone,
-                            file_url=pdf_url,
+                            file_url=self_url,
                             filename=real_name,
-                            file_id=pdf_file_id,
                         )
-                        print(f"📎 PDF de cotización enviado: {real_name}")
+                        print(f"📎 PDF enviado: {real_name} via {self_url}")
                         pdf_enviado = True
         FAREWELL_KEYWORDS = [
             "gracias", "hasta luego", "hasta pronto", "adiós", "adios",
@@ -296,12 +338,6 @@ async def callbell_webhook(request: Request):
             print(f"😴 Usuario se despidió — lead marcado como inactive: {lead_phone}")
 
         print(f"🤖 Respuesta del agente: {ai_response.output[:100]}...")
-
-        # Si se envió un PDF, reemplazar la respuesta del agente con un mensaje corto
-        if pide_cotizacion and pdf_enviado:
-            msg_pdf = "¡Aquí tienes la cotización con todos los detalles del curso! 📄 Si tienes alguna pregunta, con gusto te ayudo."
-            await send_callbell_message(to_phone=lead_phone, text_content=msg_pdf)
-            return {"status": "success", "message": "Event processed"}
 
         # Limpiar markdown y LaTeX que el modelo pueda colar
         clean_response = ai_response.output
