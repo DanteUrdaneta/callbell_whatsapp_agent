@@ -272,6 +272,33 @@ async def callbell_webhook(request: Request):
         pide_cotizacion = any(kw in user_message.lower() for kw in COTIZACION_KEYWORDS)
         MULTI_SEDE_COURSES = get_multi_sede_courses()
 
+        # ── Interceptar cursos multi-sede sin especificar sede ──────────────
+        # Si el usuario menciona un curso multi-sede sin indicar la sede,
+        # forzar la pregunta directamente sin llamar al agente
+        detected_course = detect_course_from_message(user_message.lower())
+        if detected_course and detected_course in MULTI_SEDE_COURSES:
+            # Obtener las sedes disponibles dinámicamente
+            sedes = sorted([k.replace(detected_course, "").strip().title()
+                           for k in _course_file_map.keys()
+                           if k.startswith(detected_course + " ")])
+            sedes_str = " o ".join(sedes)
+            pregunta_sede = f"Para darte la información correcta, ¿te interesa el curso en {sedes_str}?"
+            try:
+                db.update_history_message(
+                    phone_number=lead_phone,
+                    user_message=user_message,
+                    ai_message=pregunta_sede,
+                )
+            except ValueError:
+                db.create_new_lead(lead_phone)
+                db.update_history_message(
+                    phone_number=lead_phone,
+                    user_message=user_message,
+                    ai_message=pregunta_sede,
+                )
+            await send_callbell_message(to_phone=lead_phone, text_content=pregunta_sede)
+            return {"status": "success", "message": "Event processed"}
+
         # Detectar si el bot preguntó sede en el mensaje anterior y el usuario responde con la sede
         if not pide_cotizacion:
             SEDE_TRIGGER_PHRASES = ["isabela", "santo domingo", "punta cana", "la isabela"]
