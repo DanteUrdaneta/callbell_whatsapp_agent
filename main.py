@@ -240,6 +240,7 @@ async def callbell_webhook(request: Request):
         ]
         pide_cotizacion = any(kw in user_message.lower() for kw in COTIZACION_KEYWORDS)
 
+        pdf_enviado = False
         if pide_cotizacion:
             from modules.drive_reader import detect_course_from_message, get_pdf_url_for_course
             from core.callbell import send_callbell_document
@@ -256,6 +257,7 @@ async def callbell_webhook(request: Request):
                     if course_key:
                         break
 
+            pdf_enviado = False
             if course_key:
                 # Verificar que no se haya enviado ya en los últimos mensajes
                 db_history_check = db.get_chat_history(phone_number=lead_phone, limit=10)
@@ -268,13 +270,18 @@ async def callbell_webhook(request: Request):
                     pdf_info = get_pdf_url_for_course(course_key)
                     if pdf_info:
                         pdf_url, pdf_name = pdf_info
-                        clean_name = pdf_name.replace(".pdf", "").replace("08 ", "").replace("10 ", "").replace("11 ", "").strip()
+                        # Quitar prefijo numérico tipo "08 ", "10 ", "11 " del nombre
+                        import re as _re
+                        real_name = _re.sub(r'^\d+\s+', '', pdf_name.strip())
+                        if not real_name.lower().endswith(".pdf"):
+                            real_name = f"{real_name}.pdf"
                         await send_callbell_document(
                             to_phone=lead_phone,
                             file_url=pdf_url,
-                            filename=f"{clean_name}.pdf",
+                            filename=real_name,
                         )
-                        print(f"📎 PDF de cotización enviado: {pdf_name}")
+                        print(f"📎 PDF de cotización enviado: {real_name}")
+                        pdf_enviado = True
         FAREWELL_KEYWORDS = [
             "gracias", "hasta luego", "hasta pronto", "adiós", "adios",
             "bye", "chao", "chau", "ok gracias", "muchas gracias",
@@ -288,6 +295,12 @@ async def callbell_webhook(request: Request):
             print(f"😴 Usuario se despidió — lead marcado como inactive: {lead_phone}")
 
         print(f"🤖 Respuesta del agente: {ai_response.output[:100]}...")
+
+        # Si se envió un PDF, reemplazar la respuesta del agente con un mensaje corto
+        if pide_cotizacion and pdf_enviado:
+            msg_pdf = "¡Aquí tienes la cotización con todos los detalles del curso! 📄 Si tienes alguna pregunta, con gusto te ayudo."
+            await send_callbell_message(to_phone=lead_phone, text_content=msg_pdf)
+            return {"status": "success", "message": "Event processed"}
 
         # Limpiar markdown y LaTeX que el modelo pueda colar
         clean_response = ai_response.output
