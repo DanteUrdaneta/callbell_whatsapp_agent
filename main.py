@@ -285,6 +285,37 @@ async def callbell_webhook(request: Request):
         ]
         pide_cotizacion = any(kw in user_message.lower() for kw in COTIZACION_KEYWORDS)
 
+        # Detectar si el bot preguntó sede en el mensaje anterior y el usuario está respondiendo
+        if not pide_cotizacion:
+            from modules.drive_reader import get_multi_sede_courses, detect_course_from_message
+            SEDE_TRIGGER_PHRASES = ["isabela", "santo domingo", "punta cana", "sd", "pc", "la isabela"]
+            user_msg_lower_check = user_message.lower()
+            if any(s in user_msg_lower_check for s in SEDE_TRIGGER_PHRASES):
+                # Verificar que el último mensaje del bot preguntó por sede
+                history_check = db.get_chat_history(phone_number=lead_phone, limit=3)
+                last_ai = (history_check[-1].get("ai_message", "") or "") if history_check else ""
+                SEDE_QUESTION_HINTS = ["sede", "isabela", "punta cana", "santo domingo", "¿te interesa", "cuál sede", "cual sede"]
+                if any(hint in last_ai.lower() for hint in SEDE_QUESTION_HINTS):
+                    # El bot preguntó sede — buscar el curso en el historial reciente
+                    for msg in reversed(history_check or []):
+                        combined = (msg.get("user_message", "") or "") + " " + (msg.get("ai_message", "") or "")
+                        pending_course = detect_course_from_message(combined.lower())
+                        if pending_course and pending_course in get_multi_sede_courses():
+                            # Construir course_key completo con la sede respondida
+                            from modules.drive_reader import _normalize, _course_file_map
+                            sede_norm = _normalize(user_message)
+                            # Mapear variantes de sede
+                            if "isabela" in sede_norm or "santo domingo" in sede_norm or " sd" in sede_norm:
+                                sede_norm = "santo domingo"
+                            elif "punta cana" in sede_norm or " pc" in sede_norm:
+                                sede_norm = "punta cana"
+                            full_key = f"{pending_course} {sede_norm}"
+                            if full_key in _course_file_map:
+                                pide_cotizacion = True
+                                # Inyectar en el mensaje para que la detección lo encuentre
+                                user_message = f"{user_message} {full_key}"
+                            break
+
         pdf_enviado = False
         respuesta_pdf = None  # mensaje a enviar en lugar del agente cuando aplique
 
