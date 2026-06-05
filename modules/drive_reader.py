@@ -1,18 +1,30 @@
 """
 drive_reader.py
-Lee todos los PDFs de una carpeta de Google Drive y extrae su texto.
-Se ejecuta al iniciar el servidor y se refresca cada REFRESH_HOURS horas.
+Lee todos los PDFs de una carpeta de Google Drive y construye el catálogo
+de cursos dinámicamente desde los nombres de archivo.
+
+CONVENCIÓN DE NOMBRES EN GOOGLE DRIVE:
+  - Curso sin sede:    "Piloto Comercial.pdf"
+  - Curso con sede:    "Piloto Privado - Punta Cana.pdf"
+                       "Piloto Privado - Santo Domingo.pdf"
+  - Prefijo numérico ignorado: "01 Piloto Comercial.pdf" → mismo resultado
+
+El cliente solo sube o renombra PDFs en Drive. El sistema detecta
+automáticamente cursos nuevos, sedes y multi-sede sin tocar código.
 """
 
 import os
 import io
+import re
 import json
+import unicodedata
 from typing import Optional
+from collections import defaultdict
 from dotenv import load_dotenv
 
 load_dotenv()
 
-FOLDER_ID = "1z2HYoD_sNI9Iyh29Y1E_uw4GwY9K8Bb1"
+FOLDER_ID    = "1z2HYoD_sNI9Iyh29Y1E_uw4GwY9K8Bb1"
 REFRESH_HOURS = 6
 
 _cotizaciones_cache: Optional[str] = None
@@ -21,70 +33,126 @@ _files_metadata: dict = {}
 # Cache de bytes de PDFs: {file_id: bytes}
 _pdf_bytes_cache: dict = {}
 
-# Palabras clave para detectar qué curso pide el usuario
-# Formato por curso: (lista_any, lista_all)
-#   lista_any: al menos UNA de estas debe estar en el mensaje
-#   lista_all: TODAS estas deben estar en el mensaje (puede ser vacía)
-# Los cursos más específicos (punta cana / santo domingo) van primero.
-COURSE_KEYWORDS = {
-    "piloto privado punta cana":    (["privado", "cppa"], ["punta cana"]),
-    "piloto privado santo domingo": (["privado", "cpp"],  ["santo domingo", "isabela", "la isabela"]),
-    "piloto privado":               (["privado", "cpp"],  []),
-    "piloto comercial":             (["comercial", "cpc"], []),
-    "tripulante de cabina":         (["tripulante", "cabina", "azafata", "auxiliar"], []),
-    "despachador":                  (["despachador", "despacho"], []),
-    "habilitacion instrumento":     (["instrumento", "chi"], []),
-    "habilitacion monomotor":       (["monomotor"], []),
-    "carrera piloto profesional":   (["carrera piloto", "piloto profesional"], []),
-}
-
-# Mapeo de curso a nombre de archivo (palabras clave del nombre)
-COURSE_FILE_KEYWORDS = {
-    "piloto privado punta cana":    "PUNTA CANA",
-    "piloto privado santo domingo": "Piloto Privado (ENLS-1-CPP)",
-    "piloto privado":               "Piloto Privado (ENLS-1-CPP)",
-    "piloto comercial":             "Piloto Comercial",
-    "tripulante de cabina":         "Tripulante",
-    "despachador":                  "DESPACHADOR",
-    "habilitacion instrumento":     "Habilitacion de Instrumento",
-    "habilitacion monomotor":       "Habilitacion Monomotor",
-    "carrera piloto profesional":   "CARRERA PILOTO",
-}
+# Catálogo dinámico construido al cargar los PDFs de Drive:
+#   _course_file_map:  { course_key: nombre_archivo }
+#   _multi_sede:       { course_key_generico, ... }  (piloto privado, etc.)
+_course_file_map: dict = {}
+_multi_sede: set = set()
 
 
-def get_pdf_url_for_course(course_key: str) -> tuple[str, str, str] | None:
+# ── Helpers de normalización ────────────────────────────────────────────────
+
+def _normalize(text: str) -> str:
+    """Quita tildes, pasa a minúsculas y elimina caracteres no alfanuméricos."""
+    text = unicodedata.normalize("NFD", text)
+    text = "".join(c for c in text if unicodedata.category(c) != "Mn")
+    text = text.lower()
+    text = re.sub(r"[^a-z0-9\s]", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _parse_pdf_name(filename: str):
     """
-    Retorna (url_descarga, nombre_archivo, file_id) para el curso dado.
+    Dado el nombre de un PDF retorna (course_key, sede_key).
+
+    Convención:
+      'Piloto Privado - Punta Cana.pdf'    -> ('piloto privado', 'punta cana')
+      'Piloto Privado - Santo Domingo.pdf' -> ('piloto privado', 'santo domingo')
+      'Piloto Comercial.pdf'               -> ('piloto comercial', None)
+      '01 Tripulante de Cabina.pdf'        -> ('tripulante de cabina', None)
     """
-    if not _files_metadata:
-        return None
+    name = re.sub(r"^\d+\s+", "", filename.strip())       # quitar prefijo numérico
+    name = re.sub(r"\.pdf$", "", name, flags=re.IGNORECASE).strip()
 
-    file_keyword = COURSE_FILE_KEYWORDS.get(course_key, "").upper()
-    for filename, file_id in _files_metadata.items():
-        if file_keyword and file_keyword.upper() in filename.upper():
-            url = f"https://drive.google.com/uc?export=download&id={file_id}"
-            return url, filename, file_id
+    if " - " in name:
+        parts = name.split(" - ", 1)
+        return _normalize(parts[0]), _normalize(parts[1])
+    else:
+        return _normalize(name), None
 
-    return None
+
+def _build_catalog(filenames: list[str]):
+    """
+    Construye _course_file_map y _multi_sede desde la lista de nombres de archivo.
+    Se llama cada vez que se recargan los PDFs de Drive.
+    """
+    global _course_file_map, _multi_sede
+
+    parsed = []  # [(course_key, sede_key, filename)]
+    for fn in filenames:
+        course_key, sede_key = _parse_pdf_name(fn)
+        parsed.append((course_key, sede_key, fn))
+
+    # Detectar cursos con múltiples sedes
+    sedes_por_curso = defaultdict(list)
+    for course_key, sede_key, _ in parsed:
+        if sede_key:
+            sedes_por_curso[course_key].append(sede_key)
+
+    _multi_sede = {k for k, v in sedes_por_curso.items() if len(v) > 1}
+
+    # Construir mapa completo: clave específica + clave genérica para multi-sede
+    new_map = {}
+    for course_key, sede_key, fn in parsed:
+        if sede_key:
+            new_map[f"{course_key} {sede_key}"] = fn
+        else:
+            new_map[course_key] = fn
+
+    _course_file_map = new_map
+    print(f"📚 Catálogo dinámico: {list(_course_file_map.keys())}")
+    print(f"🏙️  Multi-sede: {_multi_sede}")
+
+
+# ── API pública ──────────────────────────────────────────────────────────────
+
+def get_multi_sede_courses() -> set:
+    """Retorna el set de course_keys genéricos con múltiples sedes."""
+    return _multi_sede
 
 
 def detect_course_from_message(message: str) -> str | None:
-    """Detecta qué curso está pidiendo el usuario basado en palabras clave.
-    
-    Recorre COURSE_KEYWORDS en orden (los más específicos primero).
-    Para cada curso verifica:
-      - Al menos UNA keyword de lista_any está en el mensaje
-      - TODAS las keywords de lista_all están en el mensaje
-    Devuelve el primer match.
     """
-    msg_lower = message.lower()
-    for course_key, (any_kws, all_kws) in COURSE_KEYWORDS.items():
-        has_any = any(kw in msg_lower for kw in any_kws)
-        has_all = all(kw in msg_lower for kw in all_kws) if all_kws else True
-        if has_any and has_all:
-            return course_key
+    Detecta qué curso está pidiendo el usuario.
+    Busca las claves más largas primero (más específicas).
+    Usa normalización para ignorar tildes y mayúsculas.
+    """
+    msg = _normalize(message)
+    for key in sorted(_course_file_map.keys(), key=len, reverse=True):
+        words = key.split()
+        if all(w in msg for w in words):
+            return key
     return None
 
+
+def get_pdf_url_for_course(course_key: str):
+    """
+    Retorna (url_descarga, nombre_archivo, file_id) para el curso dado, o None.
+    """
+    if not _files_metadata or not _course_file_map:
+        return None
+
+    filename = _course_file_map.get(course_key)
+    if not filename:
+        return None
+
+    file_id = _files_metadata.get(filename)
+    if not file_id:
+        # Buscar por coincidencia parcial por si el nombre tiene leve variación
+        fn_norm = _normalize(filename)
+        for fn, fid in _files_metadata.items():
+            if _normalize(fn) == fn_norm:
+                file_id = fid
+                break
+
+    if not file_id:
+        return None
+
+    url = f"https://drive.google.com/uc?export=download&id={file_id}"
+    return url, filename, file_id
+
+
+# ── Google Drive ─────────────────────────────────────────────────────────────
 
 def _get_drive_service():
     try:
@@ -109,15 +177,13 @@ def _get_drive_service():
 def _extract_text_from_pdf(pdf_bytes: bytes) -> str:
     try:
         import pypdf
-        import re
         reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
         pages = []
         for page in reader.pages:
             text = page.extract_text() or ""
-            # Limpiar espacios dobles que genera pypdf en PDFs escaneados
-            text = re.sub(r'  +', ' ', text)        # múltiples espacios → uno
-            text = re.sub(r' \n', '\n', text)        # espacio antes de salto → salto
-            text = re.sub(r'\n{3,}', '\n\n', text)  # más de 2 saltos → 2
+            text = re.sub(r"  +", " ", text)
+            text = re.sub(r" \n", "\n", text)
+            text = re.sub(r"\n{3,}", "\n\n", text)
             pages.append(text.strip())
         return "\n\n".join(pages).strip()
     except Exception as e:
@@ -126,7 +192,7 @@ def _extract_text_from_pdf(pdf_bytes: bytes) -> str:
 
 
 def make_files_public():
-    """Hace que todos los PDFs de la carpeta sean accesibles públicamente por URL."""
+    """Hace que todos los PDFs de la carpeta sean accesibles públicamente."""
     try:
         service = _get_drive_service()
         for filename, file_id in _files_metadata.items():
@@ -136,7 +202,7 @@ def make_files_public():
                     body={"type": "anyone", "role": "reader"},
                 ).execute()
             except Exception:
-                pass  # Ya puede estar público
+                pass
         print("🌐 PDFs configurados como públicos en Drive")
     except Exception as e:
         print(f"⚠️ Error configurando permisos públicos: {e}")
@@ -166,14 +232,18 @@ def load_cotizaciones() -> str:
 
         print(f"📄 Encontrados {len(files)} PDFs: {[f['name'] for f in files]}")
 
+        # Actualizar metadata y construir catálogo dinámico
+        for file in files:
+            _files_metadata[file["name"]] = file["id"]
+
+        _build_catalog(list(_files_metadata.keys()))
+
+        # Leer texto de cada PDF
         all_text = []
         for file in files:
-            # Guardar metadata para URLs de descarga
-            _files_metadata[file["name"]] = file["id"]
             try:
                 request = service.files().get_media(fileId=file["id"])
                 pdf_bytes = request.execute()
-                # Cachear bytes para servirlos directamente sin re-descargar
                 _pdf_bytes_cache[file["id"]] = pdf_bytes
                 text = _extract_text_from_pdf(pdf_bytes)
                 if text:
