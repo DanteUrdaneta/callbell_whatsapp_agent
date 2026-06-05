@@ -244,10 +244,12 @@ async def callbell_webhook(request: Request):
                 pdf_info = get_pdf_url_for_course(course_key)
                 if pdf_info:
                     pdf_url, pdf_name = pdf_info
+                    # Limpiar el nombre para que se vea bien en WhatsApp
+                    clean_name = pdf_name.replace(".pdf", "").replace("08 ", "").replace("10 ", "").replace("11 ", "").strip()
                     await send_callbell_document(
                         to_phone=lead_phone,
                         file_url=pdf_url,
-                        filename=pdf_name,
+                        filename=f"{clean_name}.pdf",
                     )
                     print(f"📎 PDF de cotización enviado: {pdf_name}")
         FAREWELL_KEYWORDS = [
