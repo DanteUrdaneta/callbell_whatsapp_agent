@@ -5,7 +5,7 @@ from core.callbell import send_callbell_message
 from modules.drive_reader import load_cotizaciones, REFRESH_HOURS
 
 # Minutos de inactividad antes de enviar el primer recordatorio
-MINUTOS_INACTIVIDAD = 3
+MINUTOS_INACTIVIDAD = 15
 
 
 def start_scheduler(db: DB):
