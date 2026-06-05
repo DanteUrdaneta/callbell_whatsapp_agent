@@ -259,6 +259,101 @@ async def callbell_webhook(request: Request):
             except Exception as e:
                 print(f"⚠️ No se pudo obtener CONFIG: {e}")
 
+        # ── Detección de PDF / sede ANTES de llamar al agente ──────────────
+        from modules.drive_reader import detect_course_from_message, get_pdf_url_for_course, get_multi_sede_courses, _normalize, _course_file_map
+        from core.callbell import send_callbell_document
+
+        COTIZACION_KEYWORDS = [
+            "cotizacion", "cotización", "pdf", "documento",
+            "mándamelo", "mandamelo", "envíala", "enviala", "envíame", "enviame",
+            "quiero la cotizacion", "dame la cotizacion", "me das la cotizacion",
+            "me mandas la cotizacion", "me envias la cotizacion", "me enviás la cotizacion",
+        ]
+        pide_cotizacion = any(kw in user_message.lower() for kw in COTIZACION_KEYWORDS)
+        MULTI_SEDE_COURSES = get_multi_sede_courses()
+
+        # Detectar si el bot preguntó sede en el mensaje anterior y el usuario responde con la sede
+        if not pide_cotizacion:
+            SEDE_TRIGGER_PHRASES = ["isabela", "santo domingo", "punta cana", "la isabela"]
+            if any(s in user_message.lower() for s in SEDE_TRIGGER_PHRASES):
+                history_check = db_history or []
+                last_ai = (history_check[-1].get("ai_message", "") or "") if history_check else ""
+                SEDE_QUESTION_HINTS = ["sede", "isabela", "punta cana", "santo domingo", "¿te interesa", "cuál prefieres", "cual prefieres", "cuál sede"]
+                if any(hint in last_ai.lower() for hint in SEDE_QUESTION_HINTS):
+                    for msg in reversed(history_check):
+                        combined = (msg.get("user_message", "") or "") + " " + (msg.get("ai_message", "") or "")
+                        pending_course = detect_course_from_message(combined.lower())
+                        if pending_course and pending_course in MULTI_SEDE_COURSES:
+                            sede_norm = _normalize(user_message)
+                            if "isabela" in sede_norm or "santo domingo" in sede_norm:
+                                sede_norm = "santo domingo"
+                            elif "punta cana" in sede_norm:
+                                sede_norm = "punta cana"
+                            full_key = f"{pending_course} {sede_norm}"
+                            if full_key in _course_file_map:
+                                pide_cotizacion = True
+                                user_message = f"{user_message} {full_key}"
+                            break
+
+        pdf_enviado = False
+        respuesta_pdf = None
+
+        if pide_cotizacion:
+            course_key = detect_course_from_message(user_message.lower())
+            if not course_key:
+                for msg in reversed(db_history or []):
+                    user_msg = msg.get("user_message", "") or ""
+                    course_key = detect_course_from_message(user_msg.lower())
+                    if course_key:
+                        break
+                if not course_key and db_history:
+                    last_ai = (db_history[-1].get("ai_message", "") or "")
+                    course_key = detect_course_from_message(last_ai.lower())
+
+            # Si es multi-sede sin especificar, dejar que el agente pregunte
+            if course_key in MULTI_SEDE_COURSES:
+                course_key = None
+
+            if course_key:
+                pdf_info = get_pdf_url_for_course(course_key)
+                if not pdf_info:
+                    respuesta_pdf = "Por el momento no tengo la cotización de ese curso disponible. Contáctanos al 829-535-1000 o info@enalas.com."
+                else:
+                    pdf_url, pdf_name, pdf_file_id = pdf_info
+                    import re as _re
+                    import urllib.parse as _up
+                    real_name = _re.sub(r'^\d+\s+', '', pdf_name.strip())
+                    if not real_name.lower().endswith(".pdf"):
+                        real_name = f"{real_name}.pdf"
+                    self_url = f"{BASE_URL}/pdf/{_up.quote(course_key)}"
+                    await send_callbell_document(
+                        to_phone=lead_phone,
+                        file_url=self_url,
+                        filename=real_name,
+                    )
+                    print(f"📎 PDF enviado: {real_name}")
+                    pdf_enviado = True
+                    respuesta_pdf = "¡Aquí tienes la cotización! Si tienes alguna pregunta, con gusto te ayudo."
+
+        # Si ya tenemos respuesta del bloque PDF, enviar y salir sin llamar al agente
+        if respuesta_pdf is not None:
+            try:
+                db.update_history_message(
+                    phone_number=lead_phone,
+                    user_message=user_message,
+                    ai_message=respuesta_pdf,
+                )
+            except ValueError:
+                db.create_new_lead(lead_phone)
+                db.update_history_message(
+                    phone_number=lead_phone,
+                    user_message=user_message,
+                    ai_message=respuesta_pdf,
+                )
+            await send_callbell_message(to_phone=lead_phone, text_content=respuesta_pdf)
+            return {"status": "success", "message": "Event processed"}
+
+        # ── Llamar al agente solo si no se manejó con PDF ──────────────────
         complete_user_message = f"{user_message}\n\n(uuid: {lead_uuid}, phone: {lead_phone}){tasa_info}"
         ai_response = await agent.run(complete_user_message, message_history=history(db_history))
 
@@ -276,107 +371,6 @@ async def callbell_webhook(request: Request):
                 ai_message=ai_response.output,
             )
 
-        # Enviar PDF solo cuando el usuario pide explícitamente la cotización
-        COTIZACION_KEYWORDS = [
-            "cotizacion", "cotización", "pdf", "documento",
-            "mándamelo", "mandamelo", "envíala", "enviala", "envíame", "enviame",
-            "quiero la cotizacion", "dame la cotizacion", "me das la cotizacion",
-            "me mandas la cotizacion", "me envias la cotizacion", "me enviás la cotizacion",
-        ]
-        pide_cotizacion = any(kw in user_message.lower() for kw in COTIZACION_KEYWORDS)
-
-        # Detectar si el bot preguntó sede en el mensaje anterior y el usuario está respondiendo
-        if not pide_cotizacion:
-            from modules.drive_reader import get_multi_sede_courses, detect_course_from_message
-            SEDE_TRIGGER_PHRASES = ["isabela", "santo domingo", "punta cana", "sd", "pc", "la isabela"]
-            user_msg_lower_check = user_message.lower()
-            if any(s in user_msg_lower_check for s in SEDE_TRIGGER_PHRASES):
-                # Verificar que el último mensaje del bot preguntó por sede
-                history_check = db.get_chat_history(phone_number=lead_phone, limit=3)
-                last_ai = (history_check[-1].get("ai_message", "") or "") if history_check else ""
-                SEDE_QUESTION_HINTS = ["sede", "isabela", "punta cana", "santo domingo", "¿te interesa", "cuál sede", "cual sede"]
-                if any(hint in last_ai.lower() for hint in SEDE_QUESTION_HINTS):
-                    # El bot preguntó sede — buscar el curso en el historial reciente
-                    for msg in reversed(history_check or []):
-                        combined = (msg.get("user_message", "") or "") + " " + (msg.get("ai_message", "") or "")
-                        pending_course = detect_course_from_message(combined.lower())
-                        if pending_course and pending_course in get_multi_sede_courses():
-                            # Construir course_key completo con la sede respondida
-                            from modules.drive_reader import _normalize, _course_file_map
-                            sede_norm = _normalize(user_message)
-                            # Mapear variantes de sede
-                            if "isabela" in sede_norm or "santo domingo" in sede_norm or " sd" in sede_norm:
-                                sede_norm = "santo domingo"
-                            elif "punta cana" in sede_norm or " pc" in sede_norm:
-                                sede_norm = "punta cana"
-                            full_key = f"{pending_course} {sede_norm}"
-                            if full_key in _course_file_map:
-                                pide_cotizacion = True
-                                # Inyectar en el mensaje para que la detección lo encuentre
-                                user_message = f"{user_message} {full_key}"
-                            break
-
-        pdf_enviado = False
-        respuesta_pdf = None  # mensaje a enviar en lugar del agente cuando aplique
-
-        if pide_cotizacion:
-            from modules.drive_reader import detect_course_from_message, get_pdf_url_for_course, get_multi_sede_courses
-            MULTI_SEDE_COURSES = get_multi_sede_courses()
-            from core.callbell import send_callbell_document
-
-            # Buscar el curso en el mensaje actual
-            course_key = detect_course_from_message(user_message.lower())
-            if not course_key:
-                # Buscar en los 3 mensajes previos del usuario
-                db_history_check = db.get_chat_history(phone_number=lead_phone, limit=3)
-                for msg in reversed(db_history_check or []):
-                    user_msg = msg.get("user_message", "") or ""
-                    course_key = detect_course_from_message(user_msg.lower())
-                    if course_key:
-                        break
-                # Si aún no encontró, buscar en el último mensaje del bot (solo el más reciente)
-                if not course_key and db_history_check:
-                    last_ai = (db_history_check[-1].get("ai_message", "") or "")
-                    course_key = detect_course_from_message(last_ai.lower())
-
-            # Si el curso detectado tiene múltiples sedes y no se especificó cuál,
-            # dejar que el agente pregunte — no enviar PDF todavía
-            if course_key in MULTI_SEDE_COURSES:
-                course_key = None
-                respuesta_pdf = None  # el agente ya preguntó o preguntará la sede
-
-            if not course_key:
-                # No se detectó el curso (o es multi-sede sin especificar) — el agente maneja la respuesta
-                pass
-            else:
-                pdf_info = get_pdf_url_for_course(course_key)
-                if not pdf_info:
-                    # El curso existe pero no hay PDF disponible
-                    respuesta_pdf = "Por el momento no tengo la cotización de ese curso disponible. Te recomiendo contactarnos al 829-535-1000 o info@enalas.com para más información."
-                else:
-                    # Verificar que no se haya enviado ya recientemente
-                    db_history_check = db.get_chat_history(phone_number=lead_phone, limit=10)
-                    ya_enviado = any(
-                        "cotización" in (m.get("ai_message", "") or "").lower() and
-                        "pdf" in (m.get("ai_message", "") or "").lower()
-                        for m in (db_history_check or [])[-3:]
-                    )
-                    if not ya_enviado:
-                        pdf_url, pdf_name, pdf_file_id = pdf_info
-                        import re as _re
-                        real_name = _re.sub(r'^\d+\s+', '', pdf_name.strip())
-                        if not real_name.lower().endswith(".pdf"):
-                            real_name = f"{real_name}.pdf"
-                        import urllib.parse as _up
-                        self_url = f"{BASE_URL}/pdf/{_up.quote(course_key)}"
-                        await send_callbell_document(
-                            to_phone=lead_phone,
-                            file_url=self_url,
-                            filename=real_name,
-                        )
-                        print(f"📎 PDF enviado: {real_name} via {self_url}")
-                        pdf_enviado = True
-                        respuesta_pdf = "¡Aquí tienes la cotización! Si tienes alguna pregunta, con gusto te ayudo."
         FAREWELL_KEYWORDS = [
             "gracias", "hasta luego", "hasta pronto", "adiós", "adios",
             "bye", "chao", "chau", "ok gracias", "muchas gracias",
@@ -391,10 +385,6 @@ async def callbell_webhook(request: Request):
 
         print(f"🤖 Respuesta del agente: {ai_response.output[:100]}...")
 
-        # Si el bloque de PDF manejó la respuesta, enviarla y salir
-        if respuesta_pdf is not None:
-            await send_callbell_message(to_phone=lead_phone, text_content=respuesta_pdf)
-            return {"status": "success", "message": "Event processed"}
 
         # Limpiar markdown y LaTeX que el modelo pueda colar
         clean_response = ai_response.output
