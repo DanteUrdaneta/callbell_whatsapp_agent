@@ -34,7 +34,37 @@ async def send_callbell_message(to_phone: str, text_content: str):
             return None
 
 
-def escalate_to_success(contact_uuid: str):
+async def send_callbell_document(to_phone: str, file_url: str, filename: str, caption: str = ""):
+    """Envía un documento PDF por WhatsApp via Callbell."""
+    url = "https://api.callbell.eu/v1/messages/send"
+    headers = {
+        "Authorization": f"Bearer {CALLBELL_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "to": to_phone,
+        "from": "whatsapp",
+        "type": "document",
+        "content": {
+            "url": file_url,
+            "name": filename,
+        }
+    }
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(url, json=payload, headers=headers)
+            if response.status_code in [200, 201]:
+                print(f"✅ Documento enviado a {to_phone}: {filename}")
+                return response.json()
+            else:
+                print(f"❌ Error enviando documento: {response.status_code} - {response.text}")
+                return None
+        except Exception as e:
+            print(f"❌ HTTP Error enviando documento: {str(e)}")
+            return None
+
+
+
     """Síncrona: asigna al equipo de Atención al Cliente y termina el bot."""
     url = f"https://api.callbell.eu/v1/contacts/{contact_uuid}"
     headers = {
