@@ -35,8 +35,8 @@ async def send_callbell_message(to_phone: str, text_content: str):
 
 
 async def send_callbell_document(to_phone: str, file_url: str, filename: str):
-    """Descarga el PDF de Drive, lo sube a hosting temporal con nombre correcto, y lo envía via Callbell."""
-    import io
+    """Envía un documento PDF via Callbell usando URL de Drive con nombre correcto."""
+    import urllib.parse
     callbell_url = "https://api.callbell.eu/v1/messages/send"
     headers = {
         "Authorization": f"Bearer {CALLBELL_API_KEY}",
@@ -44,36 +44,21 @@ async def send_callbell_document(to_phone: str, file_url: str, filename: str):
     }
 
     try:
-        # Descargar el PDF de Drive
-        async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
-            pdf_response = await client.get(file_url)
-            if pdf_response.status_code != 200:
-                print(f"❌ No se pudo descargar el PDF: {pdf_response.status_code}")
-                return None
-            pdf_bytes = pdf_response.content
-            print(f"📥 PDF descargado: {len(pdf_bytes)} bytes")
+        # Extraer el file_id de la URL de Drive y construir URL con nombre en content-disposition
+        # URL base: https://drive.google.com/uc?export=download&id=FILE_ID
+        # Con nombre: añadir &response-content-disposition=attachment;filename="nombre.pdf"
+        encoded_name = urllib.parse.quote(filename)
+        if "drive.google.com" in file_url:
+            named_url = f"{file_url}&response-content-disposition=attachment%3Bfilename%3D%22{encoded_name}%22"
+        else:
+            named_url = file_url
 
-        # Subir a 0x0.st con el nombre correcto para tener una URL limpia
-        async with httpx.AsyncClient(timeout=30) as client:
-            upload_response = await client.post(
-                "https://0x0.st",
-                files={"file": (filename, io.BytesIO(pdf_bytes), "application/pdf")},
-            )
-            if upload_response.status_code == 200:
-                hosted_url = upload_response.text.strip()
-                print(f"☁️ PDF subido a hosting temporal: {hosted_url}")
-            else:
-                # Si falla el upload, usar URL de Drive directamente
-                hosted_url = file_url
-                print(f"⚠️ Upload temporal falló, usando URL de Drive")
-
-        # Enviar a Callbell con la URL hosteada
         payload = {
             "to": to_phone,
             "from": "whatsapp",
             "type": "document",
             "content": {
-                "url": hosted_url,
+                "url": named_url,
                 "name": filename,
             }
         }
