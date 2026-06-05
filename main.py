@@ -292,39 +292,49 @@ async def callbell_webhook(request: Request):
         pide_cotizacion = any(kw in user_message.lower() for kw in COTIZACION_KEYWORDS)
 
         pdf_enviado = False
+        respuesta_pdf = None  # mensaje a enviar en lugar del agente cuando aplique
+
         if pide_cotizacion:
             from modules.drive_reader import detect_course_from_message, get_pdf_url_for_course
             from core.callbell import send_callbell_document
 
-            # Buscar el curso en el mensaje actual o en el historial reciente
+            # Buscar el curso en el mensaje actual
             course_key = detect_course_from_message(user_message.lower())
             if not course_key:
-                # Buscar solo en los 2 mensajes de usuario más recientes (no en ai_message que puede mencionar varios cursos)
-                db_history_check = db.get_chat_history(phone_number=lead_phone, limit=2)
+                # Buscar en los 3 mensajes previos del usuario
+                db_history_check = db.get_chat_history(phone_number=lead_phone, limit=3)
                 for msg in reversed(db_history_check or []):
                     user_msg = msg.get("user_message", "") or ""
                     course_key = detect_course_from_message(user_msg.lower())
                     if course_key:
                         break
+                # Si aún no encontró, buscar en el último mensaje del bot (solo el más reciente)
+                if not course_key and db_history_check:
+                    last_ai = (db_history_check[-1].get("ai_message", "") or "")
+                    course_key = detect_course_from_message(last_ai.lower())
 
-            pdf_enviado = False
-            if course_key:
-                # Verificar que no se haya enviado ya en los últimos mensajes
-                db_history_check = db.get_chat_history(phone_number=lead_phone, limit=10)
-                ya_enviado = any(
-                    "cotización" in (m.get("ai_message", "") or "").lower() and
-                    "pdf" in (m.get("ai_message", "") or "").lower()
-                    for m in (db_history_check or [])[-3:]
-                )
-                if not ya_enviado:
-                    pdf_info = get_pdf_url_for_course(course_key)
-                    if pdf_info:
+            if not course_key:
+                # No se detectó el curso — preguntarle al usuario
+                respuesta_pdf = "¿De cuál curso quieres la cotización?"
+            else:
+                pdf_info = get_pdf_url_for_course(course_key)
+                if not pdf_info:
+                    # El curso existe pero no hay PDF disponible
+                    respuesta_pdf = "Por el momento no tengo la cotización de ese curso disponible. Te recomiendo contactarnos al 829-535-1000 o info@enalas.com para más información."
+                else:
+                    # Verificar que no se haya enviado ya recientemente
+                    db_history_check = db.get_chat_history(phone_number=lead_phone, limit=10)
+                    ya_enviado = any(
+                        "cotización" in (m.get("ai_message", "") or "").lower() and
+                        "pdf" in (m.get("ai_message", "") or "").lower()
+                        for m in (db_history_check or [])[-3:]
+                    )
+                    if not ya_enviado:
                         pdf_url, pdf_name, pdf_file_id = pdf_info
                         import re as _re
                         real_name = _re.sub(r'^\d+\s+', '', pdf_name.strip())
                         if not real_name.lower().endswith(".pdf"):
                             real_name = f"{real_name}.pdf"
-                        # Usar URL propia del servidor para garantizar nombre correcto
                         import urllib.parse as _up
                         self_url = f"{BASE_URL}/pdf/{_up.quote(course_key)}"
                         await send_callbell_document(
@@ -334,6 +344,7 @@ async def callbell_webhook(request: Request):
                         )
                         print(f"📎 PDF enviado: {real_name} via {self_url}")
                         pdf_enviado = True
+                        respuesta_pdf = "¡Aquí tienes la cotización! Si tienes alguna pregunta, con gusto te ayudo."
         FAREWELL_KEYWORDS = [
             "gracias", "hasta luego", "hasta pronto", "adiós", "adios",
             "bye", "chao", "chau", "ok gracias", "muchas gracias",
@@ -348,12 +359,9 @@ async def callbell_webhook(request: Request):
 
         print(f"🤖 Respuesta del agente: {ai_response.output[:100]}...")
 
-        # Si se envió PDF, mandar mensaje corto y no la respuesta del agente (que incluye datos del curso)
-        if pdf_enviado:
-            await send_callbell_message(
-                to_phone=lead_phone,
-                text_content="Te envié la cotización con todos los detalles. ¿Tienes alguna pregunta?"
-            )
+        # Si el bloque de PDF manejó la respuesta, enviarla y salir
+        if respuesta_pdf is not None:
+            await send_callbell_message(to_phone=lead_phone, text_content=respuesta_pdf)
             return {"status": "success", "message": "Event processed"}
 
         # Limpiar markdown y LaTeX que el modelo pueda colar
