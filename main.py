@@ -384,6 +384,15 @@ async def callbell_webhook(request: Request):
         complete_user_message = f"{user_message}\n\n(uuid: {lead_uuid}, phone: {lead_phone}){tasa_info}"
         ai_response = await agent.run(complete_user_message, message_history=history(db_history))
 
+        # Calcular tokens usados en esta llamada
+        try:
+            usage = ai_response.usage()
+            tokens_this_call = usage.total_tokens or 0
+            db.add_tokens(phone_number=lead_phone, tokens=tokens_this_call)
+            print(f"🔢 Tokens usados: {tokens_this_call}")
+        except Exception as e:
+            print(f"⚠️ Error registrando tokens: {e}")
+
         try:
             db.update_history_message(
                 phone_number=lead_phone,
