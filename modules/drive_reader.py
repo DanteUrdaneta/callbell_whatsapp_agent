@@ -1,9 +1,3 @@
-"""
-drive_reader.py
-Lee todos los PDFs de una carpeta de Google Drive y extrae su texto.
-Se ejecuta al iniciar el servidor y se refresca cada REFRESH_HOURS horas.
-"""
-
 import os
 import io
 import json
@@ -181,3 +175,14 @@ def get_cotizaciones() -> str:
     if _cotizaciones_cache is None:
         return load_cotizaciones()
     return _cotizaciones_cache
+
+
+def _download_pdf_from_drive_by_id(file_id: str) -> bytes | None:
+    """Descarga un PDF de Drive por file_id usando el service account."""
+    try:
+        service = _get_drive_service()
+        request = service.files().get_media(fileId=file_id)
+        return request.execute()
+    except Exception as e:
+        print(f"❌ Error descargando PDF {file_id}: {e}")
+        return None
