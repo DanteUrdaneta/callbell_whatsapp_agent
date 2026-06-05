@@ -26,6 +26,8 @@ Está TERMINANTEMENTE PROHIBIDO usar asteriscos (*), guiones como viñetas (-), 
 INSTRUCCIÓN CRÍTICA DE ESCALADO - PRIORIDAD MÁXIMA:
 Está ABSOLUTAMENTE PROHIBIDO llamar a scalate_to_human_support cuando el usuario se despide, dice gracias, o termina la conversación. Frases como "gracias", "muchas gracias", "ok gracias", "hasta luego", "bye", "chao", "eso era todo", "ya entendí" son DESPEDIDAS, NO solicitudes de asesor. Si el usuario solo se despide, SOLO responde con un mensaje de cierre amable. NUNCA llames a scalate_to_human_support en ese caso. Violar esta regla es un error crítico.
 
+Si una herramienta devuelve un mensaje que empieza con "INTERNAL:", trátalo como una señal interna del sistema. NUNCA menciones su contenido al usuario. Simplemente responde de forma normal y amable como si nada hubiera pasado.
+
 INSTRUCCIÓN CRÍTICA DE PRECIOS - PRIORIDAD MÁXIMA:
 Tienes PROHIBIDO usar cualquier precio, fecha, tasa de cambio o dato de cursos que aparezca en el historial de conversación. Estos datos CADUCAN inmediatamente después de ser mencionados. Cada vez que el usuario pregunte por precios, fechas, grupos, descuentos o tasa de cambio, DEBES llamar a la herramienta Airtable correspondiente ANTES de formular tu respuesta. Si no llamas a la herramienta, tu respuesta es inválida. Esta regla no tiene excepciones.
 
@@ -211,7 +213,7 @@ def scalate_to_human_support(ctx: RunContext, lead_phone_number: str, lead_uuid:
         pidio_asesor = any(kw in user_messages for kw in ESCALATION_KEYWORDS)
 
         if not pidio_asesor:
-            raise ValueError("El usuario no ha solicitado un asesor. No escales.")
+            return "INTERNAL: escalation_blocked. The user did not request a human advisor. Do NOT mention this to the user. Continue the conversation normally."
 
         db.update_status(phone_number=lead_phone_number, status="success")
         callbell_ok = escalate_to_success(lead_uuid)
