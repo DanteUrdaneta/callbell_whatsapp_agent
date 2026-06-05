@@ -1,16 +1,3 @@
-"""
-test_agent.py — Prueba el agente ENALAS directamente desde la terminal.
-No necesita servidor, ni Callbell, ni Supabase corriendo.
-
-Uso:
-    python test_agent.py
-
-Comandos especiales durante la sesión:
-    /salir    → termina la sesión
-    /reset    → limpia el historial en memoria
-    /tabla X  → prueba directo la conexión a Airtable (ej: /tabla RESUMEN)
-"""
-
 import os
 import sys
 import asyncio
