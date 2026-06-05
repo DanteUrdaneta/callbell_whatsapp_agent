@@ -35,33 +35,54 @@ async def send_callbell_message(to_phone: str, text_content: str):
 
 
 async def send_callbell_document(to_phone: str, file_url: str, filename: str):
-    """Envía un documento PDF por WhatsApp via Callbell."""
+    """Descarga el PDF y lo envía como documento con nombre correcto via Callbell."""
+    import io
     url = "https://api.callbell.eu/v1/messages/send"
     headers = {
         "Authorization": f"Bearer {CALLBELL_API_KEY}",
-        "Content-Type": "application/json"
     }
-    payload = {
-        "to": to_phone,
-        "from": "whatsapp",
-        "type": "document",
-        "content": {
-            "url": file_url,
-            "name": filename,
-        }
-    }
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.post(url, json=payload, headers=headers)
+
+    try:
+        # Descargar el PDF de Drive
+        async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
+            pdf_response = await client.get(file_url)
+            if pdf_response.status_code != 200:
+                print(f"❌ No se pudo descargar el PDF: {pdf_response.status_code}")
+                return None
+            pdf_bytes = pdf_response.content
+
+        # Enviar como multipart con nombre correcto
+        async with httpx.AsyncClient(timeout=30) as client:
+            files = {
+                "file": (filename, io.BytesIO(pdf_bytes), "application/pdf"),
+            }
+            data = {
+                "to": to_phone,
+                "from": "whatsapp",
+                "type": "document",
+            }
+            response = await client.post(url, headers=headers, data=data, files=files)
             if response.status_code in [200, 201]:
                 print(f"✅ Documento enviado a {to_phone}: {filename}")
                 return response.json()
             else:
                 print(f"❌ Error enviando documento: {response.status_code} - {response.text}")
+                # Fallback: intentar con URL directa
+                payload = {
+                    "to": to_phone,
+                    "from": "whatsapp",
+                    "type": "document",
+                    "content": {"url": file_url, "name": filename},
+                }
+                headers["Content-Type"] = "application/json"
+                response2 = await client.post(url, headers=headers, json=payload)
+                if response2.status_code in [200, 201]:
+                    print(f"✅ Documento enviado (fallback URL) a {to_phone}: {filename}")
+                    return response2.json()
                 return None
-        except Exception as e:
-            print(f"❌ HTTP Error enviando documento: {str(e)}")
-            return None
+    except Exception as e:
+        print(f"❌ HTTP Error enviando documento: {str(e)}")
+        return None
 
 
 def escalate_to_success(contact_uuid: str):
