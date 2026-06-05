@@ -104,8 +104,6 @@ async def callbell_webhook(request: Request):
     print(f"📨 Evento recibido: event={event}")
 
     # ── Asesor asignado/desasignado en Callbell ──
-    # Solo reaccionar si NO llegó junto con un message_created (asignación automática)
-    # Las asignaciones automáticas de Callbell llegan simultáneamente con message_created
     if event == "contact_updated":
         raw_phone = payload.get("phoneNumber") or ""
         if not raw_phone:
@@ -113,18 +111,23 @@ async def callbell_webhook(request: Request):
         normalized = raw_phone.replace("+", "").replace(" ", "").replace("-", "")
         assigned_user = payload.get("assignedUser")
 
+        # Emails que Callbell asigna automáticamente (bot/sistema) — ignorar
+        BOT_USERS = {"lrivascompres@gmail.com"}
+
         if normalized and assigned_user:
+            # Si es un usuario del bot/sistema, ignorar
+            if assigned_user in BOT_USERS:
+                return JSONResponse(status_code=200, content={"status": "ok"})
+
             lead = db.get_lead(normalized)
             if lead:
                 ultimo_mensaje = lead.get("ultimo_mensaje")
                 ahora = datetime.datetime.now(datetime.timezone.utc)
-                # Si el último mensaje fue hace menos de 5 segundos, es asignación automática → ignorar
                 if ultimo_mensaje:
                     ultimo_dt = datetime.datetime.fromisoformat(ultimo_mensaje.replace("Z", "+00:00"))
                     segundos_diff = (ahora - ultimo_dt).total_seconds()
                     if segundos_diff < 5:
                         return JSONResponse(status_code=200, content={"status": "ok"})
-                # Asignación manual — pasar a success
                 db.update_status(phone_number=normalized, status="success")
                 print(f"👤 Asesor asignado manualmente ({assigned_user}) — lead pasado a success: {normalized}")
         elif normalized and not assigned_user:
