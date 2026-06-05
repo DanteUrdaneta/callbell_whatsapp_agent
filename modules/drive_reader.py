@@ -99,14 +99,26 @@ def get_multi_sede_courses() -> set:
 def detect_course_from_message(message: str) -> str | None:
     """
     Detecta qué curso está pidiendo el usuario.
-    Busca las claves más largas primero (más específicas).
-    Usa normalización para ignorar tildes y mayúsculas.
+    Si el curso es multi-sede y el mensaje no especifica sede,
+    retorna el course_key genérico para que main.py pregunte la sede.
     """
     msg = _normalize(message)
+
+    # Primero buscar match con sede específica (claves más largas)
     for key in sorted(_course_file_map.keys(), key=len, reverse=True):
         words = key.split()
         if all(w in msg for w in words):
-            return key
+            # Verificar si este key tiene sede (es decir, pertenece a un curso multi-sede)
+            for base_course in _multi_sede:
+                if key.startswith(base_course + " "):
+                    # Solo retornar la clave con sede si el mensaje menciona explícitamente la sede
+                    sede_part = _normalize(key[len(base_course):].strip())
+                    sede_words = sede_part.split()
+                    if all(w in msg for w in sede_words):
+                        return key  # mensaje menciona la sede → retornar clave específica
+                    else:
+                        return base_course  # mensaje no menciona sede → retornar genérico
+            return key  # curso sin multi-sede, retornar normal
     return None
 
 
