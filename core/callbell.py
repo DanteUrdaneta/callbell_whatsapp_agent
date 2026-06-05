@@ -34,7 +34,7 @@ async def send_callbell_message(to_phone: str, text_content: str):
             return None
 
 
-async def send_callbell_document(to_phone: str, file_url: str, filename: str, caption: str = ""):
+async def send_callbell_document(to_phone: str, file_url: str, filename: str):
     """Envía un documento PDF por WhatsApp via Callbell."""
     url = "https://api.callbell.eu/v1/messages/send"
     headers = {
@@ -64,7 +64,7 @@ async def send_callbell_document(to_phone: str, file_url: str, filename: str, ca
             return None
 
 
-
+def escalate_to_success(contact_uuid: str):
     """Síncrona: asigna al equipo de Atención al Cliente y termina el bot."""
     url = f"https://api.callbell.eu/v1/contacts/{contact_uuid}"
     headers = {
