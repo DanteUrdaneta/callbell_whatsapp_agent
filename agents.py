@@ -172,7 +172,9 @@ NUNCA llames a scalate_to_human_support cuando el usuario se despide, dice graci
 
 ## COTIZACIONES DETALLADAS DE CURSOS
 
-Los PDFs de cotización se envían automáticamente cuando el usuario pregunta por precios, detalles o requisitos de un curso. No necesitas leer ni repetir su contenido — el sistema se encarga de enviar el archivo correcto.
+Cuando el usuario pida explícitamente la cotización, el PDF o el documento de un curso, responde ÚNICAMENTE con una frase corta de confirmación como "¡Claro! Aquí te la envío." o "Te la mando ahora." — NUNCA incluyas precios, desglose ni datos del curso en ese mensaje. El sistema enviará el PDF automáticamente.
+
+Cuando el usuario pida INFORMACIÓN sobre un curso (precios, requisitos, detalles, etc.) SIN pedir explícitamente la cotización o el PDF, responde normalmente con los datos de Airtable.
 
 {cotizaciones_placeholder}"""
 
