@@ -9,9 +9,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-AIRTABLE_ACCESS_TOKEN    = os.environ.get("AIRTABLE_ACCESS_TOKEN")
-AIRTABLE_DASHBOARD_BASE  = os.environ.get("AIRTABLE_DASHBOARD_BASE_ID")
-DASHBOARD_TABLE_NAME     = "Dashboard"
+AIRTABLE_ACCESS_TOKEN   = os.environ.get("AIRTABLE_ACCESS_TOKEN")
+AIRTABLE_DASHBOARD_BASE = os.environ.get("AIRTABLE_DASHBOARD_BASE_ID")
+DASHBOARD_TABLE_NAME    = "Dashboard"
 
 
 def update_dashboard(db) -> None:
@@ -34,23 +34,38 @@ def update_dashboard(db) -> None:
         exitosos       = sum(1 for r in rows if r.get("status") == "success")
         tokens_totales = sum((r.get("tokens_used") or 0) for r in rows)
 
-        # ── Actualizar Airtable ───────────────────────────────────────────
+        # ── Conectar a Airtable ───────────────────────────────────────────
         api   = Api(AIRTABLE_ACCESS_TOKEN)
         table = api.table(AIRTABLE_DASHBOARD_BASE, DASHBOARD_TABLE_NAME)
 
-        # Debug: imprimir campos reales del record
-        records = table.all()
-        if records:
-            print(f"🔍 Campos reales en Airtable: {list(records[0]['fields'].keys())}")
+        # ── Leer nombres reales de campos desde el schema ─────────────────
+        schema       = table.schema()
+        field_names  = [f.name for f in schema.fields]
+        print(f"🔍 Campos reales en Airtable: {field_names}")
+
+        # Mapeo flexible: busca el campo por palabras clave (case-insensitive)
+        def find_field(keywords):
+            for name in field_names:
+                name_lower = name.lower()
+                if all(k in name_lower for k in keywords):
+                    return name
+            return None
+
+        campo_activos    = find_field(["activos"])        or "numero de usuarios activos"
+        campo_exitosos   = find_field(["exitosos"])       or "numero de usuarios exitosos"
+        campo_total      = find_field(["conversaciones"]) or "conversaciones totales"
+        campo_tokens     = find_field(["tokens"])         or "tokens totales"
+
+        print(f"📌 Usando campos: '{campo_activos}' | '{campo_exitosos}' | '{campo_total}' | '{campo_tokens}'")
 
         fields = {
-            "numero de usuarios activos":  activos,
-            "numero de usuarios exitosos": exitosos,
-            "conversaciones totales":      total,
-            "tokens totales":              tokens_totales,
+            campo_activos:  activos,
+            campo_exitosos: exitosos,
+            campo_total:    total,
+            campo_tokens:   tokens_totales,
         }
 
-        # Buscar el record existente (solo hay uno)
+        # ── Actualizar o crear el record ──────────────────────────────────
         records = table.all()
         if records:
             table.update(records[0]["id"], fields)
