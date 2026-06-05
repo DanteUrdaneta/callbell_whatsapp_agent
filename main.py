@@ -230,10 +230,13 @@ async def callbell_webhook(request: Request):
                 ai_message=ai_response.output,
             )
 
-        # Detectar si el usuario está pidiendo cotización de un curso y enviar el PDF
-        COTIZACION_KEYWORDS = ["cotizacion", "cotización", "pdf", "documento", "detalles", "requisitos",
-                               "cuánto cuesta", "cuanto cuesta", "precio", "inscripcion", "inscripción",
-                               "informacion completa", "información completa", "más información", "mas informacion"]
+        # Enviar PDF solo cuando el usuario pide explícitamente la cotización
+        COTIZACION_KEYWORDS = [
+            "cotizacion", "cotización", "pdf", "documento",
+            "envía el documento", "envia el documento",
+            "manda el pdf", "quiero el pdf", "dame el pdf",
+            "informacion completa", "información completa",
+        ]
         pide_cotizacion = any(kw in user_message.lower() for kw in COTIZACION_KEYWORDS)
 
         if pide_cotizacion:
@@ -241,17 +244,24 @@ async def callbell_webhook(request: Request):
             from core.callbell import send_callbell_document
             course_key = detect_course_from_message(user_message.lower())
             if course_key:
-                pdf_info = get_pdf_url_for_course(course_key)
-                if pdf_info:
-                    pdf_url, pdf_name = pdf_info
-                    # Limpiar el nombre para que se vea bien en WhatsApp
-                    clean_name = pdf_name.replace(".pdf", "").replace("08 ", "").replace("10 ", "").replace("11 ", "").strip()
-                    await send_callbell_document(
-                        to_phone=lead_phone,
-                        file_url=pdf_url,
-                        filename=f"{clean_name}.pdf",
-                    )
-                    print(f"📎 PDF de cotización enviado: {pdf_name}")
+                # Verificar que no se haya enviado ya en los últimos mensajes
+                db_history_check = db.get_chat_history(phone_number=lead_phone, limit=10)
+                ya_enviado = any(
+                    "cotización" in (m.get("ai_message", "") or "").lower() and
+                    "pdf" in (m.get("ai_message", "") or "").lower()
+                    for m in (db_history_check or [])[-3:]
+                )
+                if not ya_enviado:
+                    pdf_info = get_pdf_url_for_course(course_key)
+                    if pdf_info:
+                        pdf_url, pdf_name = pdf_info
+                        clean_name = pdf_name.replace(".pdf", "").replace("08 ", "").replace("10 ", "").replace("11 ", "").strip()
+                        await send_callbell_document(
+                            to_phone=lead_phone,
+                            file_url=pdf_url,
+                            filename=f"{clean_name}.pdf",
+                        )
+                        print(f"📎 PDF de cotización enviado: {pdf_name}")
         FAREWELL_KEYWORDS = [
             "gracias", "hasta luego", "hasta pronto", "adiós", "adios",
             "bye", "chao", "chau", "ok gracias", "muchas gracias",
