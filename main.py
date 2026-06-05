@@ -421,6 +421,13 @@ async def callbell_webhook(request: Request):
 
         print(f"🤖 Respuesta del agente: {ai_response.output[:100]}...")
 
+        # Actualizar dashboard en Airtable
+        try:
+            from modules.dashboard import update_dashboard
+            update_dashboard(db)
+        except Exception as e:
+            print(f"⚠️ Error en dashboard: {e}")
+
 
         # Limpiar markdown y LaTeX que el modelo pueda colar
         clean_response = ai_response.output
