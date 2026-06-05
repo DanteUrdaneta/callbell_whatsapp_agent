@@ -1,19 +1,3 @@
-"""
-drive_reader.py
-Lee todos los PDFs de una carpeta de Google Drive y construye el catálogo
-de cursos dinámicamente desde los nombres de archivo.
-
-CONVENCIÓN DE NOMBRES EN GOOGLE DRIVE:
-  - Curso sin sede:    "Piloto Comercial.pdf"
-  - Curso con sede:    "Piloto Privado - Punta Cana.pdf"
-                       "Piloto Privado - Santo Domingo.pdf"
-  - Prefijo numérico ignorado: "01 Piloto Comercial.pdf" → mismo resultado
-  - Códigos entre paréntesis ignorados: "Piloto Comercial (ENLS-1-CPC).pdf" → mismo resultado
-
-El cliente solo sube o renombra PDFs en Drive. El sistema detecta
-automáticamente cursos nuevos, sedes y multi-sede sin tocar código.
-"""
-
 import os
 import io
 import re
