@@ -35,34 +35,45 @@ async def send_callbell_message(to_phone: str, text_content: str):
 
 
 async def send_callbell_document(to_phone: str, file_url: str, filename: str):
-    """Envía un documento PDF via Callbell usando URL de Drive con nombre correcto."""
-    import urllib.parse
+    """Descarga el PDF desde Drive y lo re-sube con el nombre correcto antes de enviarlo por Callbell."""
     callbell_url = "https://api.callbell.eu/v1/messages/send"
-    headers = {
-        "Authorization": f"Bearer {CALLBELL_API_KEY}",
-        "Content-Type": "application/json",
-    }
 
     try:
-        # Extraer el file_id de la URL de Drive y construir URL con nombre en content-disposition
-        # URL base: https://drive.google.com/uc?export=download&id=FILE_ID
-        # Con nombre: añadir &response-content-disposition=attachment;filename="nombre.pdf"
-        encoded_name = urllib.parse.quote(filename)
-        if "drive.google.com" in file_url:
-            named_url = f"{file_url}&response-content-disposition=attachment%3Bfilename%3D%22{encoded_name}%22"
-        else:
-            named_url = file_url
+        async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
+            # 1. Descargar el PDF desde Drive
+            dl_response = await client.get(file_url)
+            if dl_response.status_code != 200:
+                print(f"❌ Error descargando PDF desde Drive: {dl_response.status_code}")
+                return None
+            pdf_bytes = dl_response.content
 
-        payload = {
-            "to": to_phone,
-            "from": "whatsapp",
-            "type": "document",
-            "content": {
-                "url": named_url,
-                "name": filename,
+            # 2. Re-subir a transfer.sh con el nombre correcto
+            upload_url = f"https://transfer.sh/{filename}"
+            upload_response = await client.put(
+                upload_url,
+                content=pdf_bytes,
+                headers={"Content-Type": "application/pdf", "Max-Days": "1"},
+            )
+            if upload_response.status_code != 200:
+                print(f"❌ Error subiendo a transfer.sh: {upload_response.status_code} - {upload_response.text}")
+                return None
+            public_url = upload_response.text.strip()
+            print(f"📤 PDF subido a transfer.sh: {public_url}")
+
+            # 3. Enviar a Callbell con la URL pública que ya tiene el nombre correcto
+            headers = {
+                "Authorization": f"Bearer {CALLBELL_API_KEY}",
+                "Content-Type": "application/json",
             }
-        }
-        async with httpx.AsyncClient(timeout=30) as client:
+            payload = {
+                "to": to_phone,
+                "from": "whatsapp",
+                "type": "document",
+                "content": {
+                    "url": public_url,
+                    "name": filename,
+                },
+            }
             response = await client.post(callbell_url, headers=headers, json=payload)
             if response.status_code in [200, 201]:
                 print(f"✅ Documento enviado a {to_phone}: {filename}")
@@ -70,6 +81,7 @@ async def send_callbell_document(to_phone: str, file_url: str, filename: str):
             else:
                 print(f"❌ Error enviando documento: {response.status_code} - {response.text}")
                 return None
+
     except Exception as e:
         print(f"❌ HTTP Error enviando documento: {str(e)}")
         return None
