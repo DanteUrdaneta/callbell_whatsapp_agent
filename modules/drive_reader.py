@@ -16,6 +16,59 @@ FOLDER_ID = "1z2HYoD_sNI9Iyh29Y1E_uw4GwY9K8Bb1"
 REFRESH_HOURS = 6
 
 _cotizaciones_cache: Optional[str] = None
+# Cache de metadatos: {nombre_archivo: file_id}
+_files_metadata: dict = {}
+
+# Palabras clave para detectar qué curso pide el usuario
+COURSE_KEYWORDS = {
+    "piloto privado punta cana": ["privado", "punta cana", "cppa"],
+    "piloto privado santo domingo": ["privado", "santo domingo", "cpp"],
+    "piloto comercial": ["comercial", "cpc"],
+    "tripulante de cabina": ["tripulante", "cabina", "azafata", "auxiliar"],
+    "despachador": ["despachador", "despacho"],
+    "habilitacion instrumento": ["instrumento", "chi", "habilitacion"],
+    "carrera piloto profesional": ["carrera", "profesional", "monomotor"],
+}
+
+# Mapeo de curso a nombre de archivo (palabras clave del nombre)
+COURSE_FILE_KEYWORDS = {
+    "piloto privado punta cana": "PUNTA CANA",
+    "piloto privado santo domingo": "Piloto Privado (ENLS-1-CPP)",
+    "piloto comercial": "Piloto Comercial",
+    "tripulante de cabina": "Tripulante",
+    "despachador": "DESPACHADOR",
+    "habilitacion instrumento": "Habilitacion de Instrumento",
+    "carrera piloto profesional": "CARRERA PILOTO",
+}
+
+
+def get_pdf_url_for_course(course_key: str) -> tuple[str, str] | None:
+    """
+    Retorna (url_descarga, nombre_archivo) para el curso dado.
+    La URL de Drive para descarga pública es:
+    https://drive.google.com/uc?export=download&id=FILE_ID
+    """
+    if not _files_metadata:
+        return None
+
+    file_keyword = COURSE_FILE_KEYWORDS.get(course_key, "").upper()
+    for filename, file_id in _files_metadata.items():
+        if file_keyword and file_keyword.upper() in filename.upper():
+            url = f"https://drive.google.com/uc?export=download&id={file_id}"
+            return url, filename
+
+    return None
+
+
+def detect_course_from_message(message: str) -> str | None:
+    """Detecta qué curso está pidiendo el usuario basado en palabras clave."""
+    msg_lower = message.lower()
+    for course_key, keywords in COURSE_KEYWORDS.items():
+        if all(kw in msg_lower for kw in keywords) or any(kw in msg_lower for kw in keywords[:1]):
+            # Verificar que hay al menos la primera keyword (más específica)
+            if keywords[0] in msg_lower:
+                return course_key
+    return None
 
 
 def _get_drive_service():
@@ -30,7 +83,7 @@ def _get_drive_service():
         creds_info = json.loads(creds_json)
         credentials = service_account.Credentials.from_service_account_info(
             creds_info,
-            scopes=["https://www.googleapis.com/auth/drive.readonly"],
+            scopes=["https://www.googleapis.com/auth/drive"],
         )
         return build("drive", "v3", credentials=credentials)
     except Exception as e:
@@ -55,6 +108,23 @@ def _extract_text_from_pdf(pdf_bytes: bytes) -> str:
     except Exception as e:
         print(f"❌ Error extrayendo texto del PDF: {e}")
         return ""
+
+
+def make_files_public():
+    """Hace que todos los PDFs de la carpeta sean accesibles públicamente por URL."""
+    try:
+        service = _get_drive_service()
+        for filename, file_id in _files_metadata.items():
+            try:
+                service.permissions().create(
+                    fileId=file_id,
+                    body={"type": "anyone", "role": "reader"},
+                ).execute()
+            except Exception:
+                pass  # Ya puede estar público
+        print("🌐 PDFs configurados como públicos en Drive")
+    except Exception as e:
+        print(f"⚠️ Error configurando permisos públicos: {e}")
 
 
 def load_cotizaciones() -> str:
@@ -83,6 +153,8 @@ def load_cotizaciones() -> str:
 
         all_text = []
         for file in files:
+            # Guardar metadata para URLs de descarga
+            _files_metadata[file["name"]] = file["id"]
             try:
                 request = service.files().get_media(fileId=file["id"])
                 pdf_bytes = request.execute()
@@ -98,6 +170,7 @@ def load_cotizaciones() -> str:
 
         _cotizaciones_cache = "\n\n".join(all_text)
         print(f"📚 Cotizaciones cargadas: {len(_cotizaciones_cache)} caracteres totales")
+        make_files_public()
         return _cotizaciones_cache
 
     except Exception as e:
