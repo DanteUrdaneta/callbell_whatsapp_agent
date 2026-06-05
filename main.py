@@ -25,7 +25,6 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 if not SUPABASE_URL or not SUPABASE_KEY:
     raise ValueError("❌ Error: SUPABASE_URL or SUPABASE_KEY not exist in .env")
 
-# URL pública del servidor (Railway la expone como RAILWAY_PUBLIC_DOMAIN)
 BASE_URL = os.environ.get("BASE_URL") or (
     f"https://{os.environ['RAILWAY_PUBLIC_DOMAIN']}"
     if os.environ.get("RAILWAY_PUBLIC_DOMAIN")
@@ -35,15 +34,25 @@ BASE_URL = os.environ.get("BASE_URL") or (
 groq_client = AsyncGroq(api_key=os.environ.get("GROQ_API_KEY"))
 db = DB(url=SUPABASE_URL, key=SUPABASE_KEY)
 
-# Cache FIFO para deduplicar mensajes procesados recientemente
 MAX_CACHE_SIZE = 200
 processed_messages: deque = deque(maxlen=MAX_CACHE_SIZE)
 
+# Keywords para detectar que el usuario quiere un asesor
+ASESOR_KEYWORDS = [
+    "asesor", "agente", "humano", "persona real", "hablar con alguien",
+    "llamar", "llamame", "llámame", "quiero hablar", "me pueden llamar",
+    "pueden contactarme", "contactarme con", "quiero contactar",
+    "me contactas", "contactas con", "me pones", "ponme con",
+]
 
-# ── Lifespan (reemplaza el deprecado @app.on_event) ──────────────────────────
+
+def quiere_asesor(texto: str) -> bool:
+    t = texto.lower()
+    return any(kw in t for kw in ASESOR_KEYWORDS)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Cargar cotizaciones de Drive al iniciar
     import asyncio
     from modules.drive_reader import load_cotizaciones
     loop = asyncio.get_event_loop()
@@ -95,13 +104,11 @@ async def index():
 
 @app.api_route("/pdf/{course_key:path}", methods=["GET", "HEAD"])
 async def serve_pdf(request: Request, course_key: str):
-    """Sirve el PDF de un curso directamente desde el cache en memoria."""
     import urllib.parse
     from fastapi.responses import Response
     from modules.drive_reader import get_pdf_url_for_course, _download_pdf_from_drive_by_id
 
     course_key = urllib.parse.unquote(course_key)
-
     pdf_info = get_pdf_url_for_course(course_key)
     if not pdf_info:
         raise HTTPException(status_code=404, detail="Curso no encontrado")
@@ -113,7 +120,6 @@ async def serve_pdf(request: Request, course_key: str):
     if not clean.lower().endswith(".pdf"):
         clean = f"{clean}.pdf"
 
-    # HEAD request: solo confirmar que existe, sin descargar el PDF
     if request.method == "HEAD":
         return Response(
             content=b"",
@@ -149,7 +155,6 @@ async def callbell_webhook(request: Request):
 
     print(f"📨 Evento recibido: event={event}")
 
-    # ── Asesor asignado/desasignado en Callbell ──
     if event == "contact_updated":
         raw_phone = payload.get("phoneNumber") or ""
         if not raw_phone:
@@ -157,14 +162,11 @@ async def callbell_webhook(request: Request):
         normalized = raw_phone.replace("+", "").replace(" ", "").replace("-", "")
         assigned_user = payload.get("assignedUser")
 
-        # Emails que Callbell asigna automáticamente (bot/sistema) — ignorar
         BOT_USERS = {"lrivascompres@gmail.com"}
 
         if normalized and assigned_user:
-            # Si es un usuario del bot/sistema, ignorar
             if assigned_user in BOT_USERS:
                 return JSONResponse(status_code=200, content={"status": "ok"})
-
             lead = db.get_lead(normalized)
             if lead:
                 ultimo_mensaje = lead.get("ultimo_mensaje")
@@ -183,7 +185,6 @@ async def callbell_webhook(request: Request):
                 print(f"👤 Asesor desasignado — lead vuelto a onboarding: {normalized}")
         return JSONResponse(status_code=200, content={"status": "ok"})
 
-    # ── Reset a onboarding cuando se cierra la conversación ──
     if event == "conversation_closed":
         contact = payload.get("contact", {})
         raw_phone = contact.get("phoneNumber", "")
@@ -193,7 +194,6 @@ async def callbell_webhook(request: Request):
             print(f"🔄 Conversación cerrada — lead reseteado a onboarding: {normalized}")
         return JSONResponse(status_code=200, content={"status": "ok"})
 
-    # ── Mensajes normales ──
     try:
         webhook_data = CallbellWebhook(**body)
     except Exception as e:
@@ -212,13 +212,11 @@ async def callbell_webhook(request: Request):
         print(f"⚠️ Ignorando mensaje con status: {msg_payload.status}")
         return {"status": "ignored", "message": "Message was not received"}
 
-    # ── Deduplicación FIFO ──
     if message_uuid in processed_messages:
         print(f"⚠️ Mensaje duplicado ignorado: {message_uuid}")
         return {"status": "ignored", "message": "Duplicate message"}
-    processed_messages.append(message_uuid)  # deque(maxlen=200) elimina el más antiguo automáticamente
+    processed_messages.append(message_uuid)
 
-    # ── Verificar estado en Supabase ──
     lead = db.get_lead(lead_phone)
     if lead and lead.get("status") == "success":
         print(f"⚠️ Lead en status success, ignorando mensaje del bot")
@@ -246,8 +244,74 @@ async def callbell_webhook(request: Request):
 
     try:
         db_history = db.get_chat_history(phone_number=lead_phone, limit=5)
+        lead = db.get_lead(lead_phone)
+        lead_status = lead.get("status", "onboarding") if lead else "onboarding"
 
-        # Si el usuario pregunta por precios en pesos, inyectar la tasa de cambio automáticamente
+        # ── FLUJO DE ESCALADO A ASESOR (hardcodeado, sin depender del modelo) ──
+
+        # PASO 2: Usuario ya dio nombre+número, estamos esperando confirmación
+        if lead_status == "esperando_confirmacion_asesor":
+            msg_lower = user_message.lower().strip()
+            confirma = any(kw in msg_lower for kw in ["si", "sí", "yes", "correcto", "exacto", "confirmo", "ok", "claro"])
+            if confirma:
+                # Buscar el número en el historial reciente
+                numero_guardado = ""
+                for msg in reversed(db_history or []):
+                    ai_msg = msg.get("ai_message", "") or ""
+                    if "confirmas" in ai_msg.lower() or "¿es" in ai_msg.lower():
+                        import re
+                        numeros = re.findall(r'\d{7,15}', ai_msg)
+                        if numeros:
+                            numero_guardado = numeros[0]
+                            break
+
+                # Obtener nombre del historial
+                nombre_guardado = ""
+                for msg in reversed(db_history or []):
+                    meta = msg.get("user_message", "") or ""
+                    if len(meta.split()) >= 1 and len(meta) < 50:
+                        nombre_guardado = meta.split()[0].capitalize()
+                        break
+
+                respuesta = f"Perfecto, estoy conectándote con un asesor ahora mismo. Tendrás contacto en breve. Gracias, {nombre_guardado}." if nombre_guardado else "Perfecto, estoy conectándote con un asesor ahora mismo. Tendrás contacto en breve."
+                db.update_status(phone_number=lead_phone, status="success")
+                escalate_to_success(lead_uuid)
+                db.update_history_message(phone_number=lead_phone, user_message=user_message, ai_message=respuesta)
+                await send_callbell_message(to_phone=lead_phone, text_content=respuesta)
+                print(f"✅ Lead escalado a asesor: {lead_phone}")
+                return {"status": "success", "message": "Event processed"}
+            else:
+                # No confirmó, volver a pedir datos
+                db.update_status(phone_number=lead_phone, status="onboarding")
+
+        # PASO 1b: Usuario ya dio datos (nombre+número), pedir confirmación
+        if lead_status == "esperando_datos_asesor":
+            import re
+            numeros = re.findall(r'\d{7,15}', user_message)
+            if numeros:
+                numero = numeros[0]
+                respuesta = f"Quiero asegurarme de tener bien tu número, ¿me lo confirmas? ¿Es {numero}?"
+                db.update_status(phone_number=lead_phone, status="esperando_confirmacion_asesor")
+                db.update_history_message(phone_number=lead_phone, user_message=user_message, ai_message=respuesta)
+                await send_callbell_message(to_phone=lead_phone, text_content=respuesta)
+                return {"status": "success", "message": "Event processed"}
+            else:
+                # No dio número, volver a pedir
+                respuesta = "Para conectarte con un asesor necesito tu nombre y número de teléfono. ¿Me los puedes dar?"
+                db.update_history_message(phone_number=lead_phone, user_message=user_message, ai_message=respuesta)
+                await send_callbell_message(to_phone=lead_phone, text_content=respuesta)
+                return {"status": "success", "message": "Event processed"}
+
+        # PASO 1: Usuario pide asesor por primera vez
+        if quiere_asesor(user_message):
+            respuesta = "Con gusto, puedo conectarte con un asesor. Primero, ¿me puedes dar tu nombre y un número de contacto para que puedan comunicarse contigo?"
+            db.update_status(phone_number=lead_phone, status="esperando_datos_asesor")
+            db.update_history_message(phone_number=lead_phone, user_message=user_message, ai_message=respuesta)
+            await send_callbell_message(to_phone=lead_phone, text_content=respuesta)
+            return {"status": "success", "message": "Event processed"}
+
+        # ── Fin flujo asesor ──────────────────────────────────────────────────
+
         PESOS_KEYWORDS = ["pesos", "peso dominicano", "dop", "en pesos", "a pesos"]
         msg_lower = user_message.lower()
         tasa_info = ""
@@ -259,7 +323,6 @@ async def callbell_webhook(request: Request):
             except Exception as e:
                 print(f"⚠️ No se pudo obtener CONFIG: {e}")
 
-        # ── Detección de PDF / sede ANTES de llamar al agente ──────────────
         from modules.drive_reader import detect_course_from_message, get_pdf_url_for_course, get_multi_sede_courses, _normalize, _course_file_map
         from core.callbell import send_callbell_document
 
@@ -272,34 +335,21 @@ async def callbell_webhook(request: Request):
         pide_cotizacion = any(kw in user_message.lower() for kw in COTIZACION_KEYWORDS)
         MULTI_SEDE_COURSES = get_multi_sede_courses()
 
-        # ── Interceptar cursos multi-sede sin especificar sede ──────────────
-        # Si el usuario menciona un curso multi-sede sin indicar la sede,
-        # forzar la pregunta directamente sin llamar al agente
         detected_course = detect_course_from_message(user_message.lower())
         if detected_course and detected_course in MULTI_SEDE_COURSES:
-            # Obtener las sedes disponibles dinámicamente
             sedes = sorted([k.replace(detected_course, "").strip().title()
                            for k in _course_file_map.keys()
                            if k.startswith(detected_course + " ")])
             sedes_str = " o ".join(sedes)
             pregunta_sede = f"Para darte la información correcta, ¿te interesa el curso en {sedes_str}?"
             try:
-                db.update_history_message(
-                    phone_number=lead_phone,
-                    user_message=user_message,
-                    ai_message=pregunta_sede,
-                )
+                db.update_history_message(phone_number=lead_phone, user_message=user_message, ai_message=pregunta_sede)
             except ValueError:
                 db.create_new_lead(lead_phone)
-                db.update_history_message(
-                    phone_number=lead_phone,
-                    user_message=user_message,
-                    ai_message=pregunta_sede,
-                )
+                db.update_history_message(phone_number=lead_phone, user_message=user_message, ai_message=pregunta_sede)
             await send_callbell_message(to_phone=lead_phone, text_content=pregunta_sede)
             return {"status": "success", "message": "Event processed"}
 
-        # Detectar si el bot preguntó sede en el mensaje anterior y el usuario responde con la sede
         if not pide_cotizacion:
             SEDE_TRIGGER_PHRASES = ["isabela", "santo domingo", "punta cana", "la isabela"]
             if any(s in user_message.lower() for s in SEDE_TRIGGER_PHRASES):
@@ -337,7 +387,6 @@ async def callbell_webhook(request: Request):
                     last_ai = (db_history[-1].get("ai_message", "") or "")
                     course_key = detect_course_from_message(last_ai.lower())
 
-            # Si es multi-sede sin especificar, dejar que el agente pregunte
             if course_key in MULTI_SEDE_COURSES:
                 course_key = None
 
@@ -362,29 +411,18 @@ async def callbell_webhook(request: Request):
                     pdf_enviado = True
                     respuesta_pdf = "¡Aquí tienes la cotización! Si tienes alguna pregunta, con gusto te ayudo."
 
-        # Si ya tenemos respuesta del bloque PDF, enviar y salir sin llamar al agente
         if respuesta_pdf is not None:
             try:
-                db.update_history_message(
-                    phone_number=lead_phone,
-                    user_message=user_message,
-                    ai_message=respuesta_pdf,
-                )
+                db.update_history_message(phone_number=lead_phone, user_message=user_message, ai_message=respuesta_pdf)
             except ValueError:
                 db.create_new_lead(lead_phone)
-                db.update_history_message(
-                    phone_number=lead_phone,
-                    user_message=user_message,
-                    ai_message=respuesta_pdf,
-                )
+                db.update_history_message(phone_number=lead_phone, user_message=user_message, ai_message=respuesta_pdf)
             await send_callbell_message(to_phone=lead_phone, text_content=respuesta_pdf)
             return {"status": "success", "message": "Event processed"}
 
-        # ── Llamar al agente solo si no se manejó con PDF ──────────────────
         complete_user_message = f"{user_message}\n\n(uuid: {lead_uuid}, phone: {lead_phone}){tasa_info}"
         ai_response = await agent.run(complete_user_message, message_history=history(db_history))
 
-        # Calcular tokens usados en esta llamada
         try:
             usage = ai_response.usage
             tokens_this_call = usage.total_tokens or 0
@@ -394,18 +432,10 @@ async def callbell_webhook(request: Request):
             print(f"⚠️ Error registrando tokens: {e}")
 
         try:
-            db.update_history_message(
-                phone_number=lead_phone,
-                user_message=user_message,
-                ai_message=ai_response.output,
-            )
+            db.update_history_message(phone_number=lead_phone, user_message=user_message, ai_message=ai_response.output)
         except ValueError:
             db.create_new_lead(lead_phone)
-            db.update_history_message(
-                phone_number=lead_phone,
-                user_message=user_message,
-                ai_message=ai_response.output,
-            )
+            db.update_history_message(phone_number=lead_phone, user_message=user_message, ai_message=ai_response.output)
 
         FAREWELL_KEYWORDS = [
             "gracias", "hasta luego", "hasta pronto", "adiós", "adios",
@@ -421,35 +451,32 @@ async def callbell_webhook(request: Request):
 
         print(f"🤖 Respuesta del agente: {ai_response.output[:100]}...")
 
-        # Actualizar dashboard en Airtable
         try:
             from modules.dashboard import update_dashboard
             update_dashboard(db)
         except Exception as e:
             print(f"⚠️ Error en dashboard: {e}")
 
-
-        # Limpiar markdown y LaTeX que el modelo pueda colar
         clean_response = ai_response.output
         import re
-        clean_response = re.sub(r'\*+([^*]+)\*+', r'\1', clean_response)       # **texto** o *texto*
-        clean_response = re.sub(r'_+([^_]+)_+', r'\1', clean_response)         # __texto__ o _texto_
-        clean_response = re.sub(r'^#{1,6}\s+', '', clean_response, flags=re.MULTILINE)  # # headers
-        clean_response = re.sub(r'\\\(.*?\\\)', lambda m: m.group(0)           # LaTeX inline \( \)
+        clean_response = re.sub(r'\*+([^*]+)\*+', r'\1', clean_response)
+        clean_response = re.sub(r'_+([^_]+)_+', r'\1', clean_response)
+        clean_response = re.sub(r'^#{1,6}\s+', '', clean_response, flags=re.MULTILINE)
+        clean_response = re.sub(r'\\\(.*?\\\)', lambda m: m.group(0)
             .replace('\\(', '').replace('\\)', '')
             .replace('\\,', ' ').replace('\\text{', '').replace('}', '')
             .replace('\\times', 'x').replace('\\approx', '≈').strip(),
             clean_response)
-        clean_response = re.sub(r'\\text\{([^}]+)\}', r'\1', clean_response)   # \text{...}
-        clean_response = re.sub(r'\\times', 'x', clean_response)               # \times
-        clean_response = re.sub(r'\\approx', '≈', clean_response)              # \approx
-        clean_response = re.sub(r'\\,', ' ', clean_response)                   # \,
-        clean_response = re.sub(r'\\\[.*?\\\]', lambda m: m.group(0)           # LaTeX block \[ \]
+        clean_response = re.sub(r'\\text\{([^}]+)\}', r'\1', clean_response)
+        clean_response = re.sub(r'\\times', 'x', clean_response)
+        clean_response = re.sub(r'\\approx', '≈', clean_response)
+        clean_response = re.sub(r'\\,', ' ', clean_response)
+        clean_response = re.sub(r'\\\[.*?\\\]', lambda m: m.group(0)
             .replace('\\[', '').replace('\\]', '')
             .replace('\\,', ' ').replace('\\text{', '').replace('}', '')
             .replace('\\times', 'x').replace('\\approx', '≈').strip(),
             clean_response, flags=re.DOTALL)
-        clean_response = re.sub(r'^\s*-\s+', '• ', clean_response, flags=re.MULTILINE)  # - item → • item
+        clean_response = re.sub(r'^\s*-\s+', '• ', clean_response, flags=re.MULTILINE)
 
         await send_callbell_message(to_phone=lead_phone, text_content=clean_response)
 
