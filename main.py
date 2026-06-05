@@ -269,7 +269,7 @@ async def callbell_webhook(request: Request):
                 if not ya_enviado:
                     pdf_info = get_pdf_url_for_course(course_key)
                     if pdf_info:
-                        pdf_url, pdf_name = pdf_info
+                        pdf_url, pdf_name, pdf_file_id = pdf_info
                         # Quitar prefijo numérico tipo "08 ", "10 ", "11 " del nombre
                         import re as _re
                         real_name = _re.sub(r'^\d+\s+', '', pdf_name.strip())
@@ -279,6 +279,7 @@ async def callbell_webhook(request: Request):
                             to_phone=lead_phone,
                             file_url=pdf_url,
                             filename=real_name,
+                            file_id=pdf_file_id,
                         )
                         print(f"📎 PDF de cotización enviado: {real_name}")
                         pdf_enviado = True
