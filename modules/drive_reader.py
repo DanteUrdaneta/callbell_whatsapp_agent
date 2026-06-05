@@ -22,25 +22,33 @@ _files_metadata: dict = {}
 _pdf_bytes_cache: dict = {}
 
 # Palabras clave para detectar qué curso pide el usuario
+# Formato por curso: (lista_any, lista_all)
+#   lista_any: al menos UNA de estas debe estar en el mensaje
+#   lista_all: TODAS estas deben estar en el mensaje (puede ser vacía)
+# Los cursos más específicos (punta cana / santo domingo) van primero.
 COURSE_KEYWORDS = {
-    "piloto privado punta cana": ["privado", "punta cana", "cppa"],
-    "piloto privado santo domingo": ["privado", "santo domingo", "cpp"],
-    "piloto comercial": ["comercial", "cpc"],
-    "tripulante de cabina": ["tripulante", "cabina", "azafata", "auxiliar"],
-    "despachador": ["despachador", "despacho"],
-    "habilitacion instrumento": ["instrumento", "chi", "habilitacion"],
-    "carrera piloto profesional": ["carrera", "profesional", "monomotor"],
+    "piloto privado punta cana":    (["privado", "cppa"], ["punta cana"]),
+    "piloto privado santo domingo": (["privado", "cpp"],  ["santo domingo", "isabela", "la isabela"]),
+    "piloto privado":               (["privado", "cpp"],  []),
+    "piloto comercial":             (["comercial", "cpc"], []),
+    "tripulante de cabina":         (["tripulante", "cabina", "azafata", "auxiliar"], []),
+    "despachador":                  (["despachador", "despacho"], []),
+    "habilitacion instrumento":     (["instrumento", "chi"], []),
+    "habilitacion monomotor":       (["monomotor"], []),
+    "carrera piloto profesional":   (["carrera piloto", "piloto profesional"], []),
 }
 
 # Mapeo de curso a nombre de archivo (palabras clave del nombre)
 COURSE_FILE_KEYWORDS = {
-    "piloto privado punta cana": "PUNTA CANA",
+    "piloto privado punta cana":    "PUNTA CANA",
     "piloto privado santo domingo": "Piloto Privado (ENLS-1-CPP)",
-    "piloto comercial": "Piloto Comercial",
-    "tripulante de cabina": "Tripulante",
-    "despachador": "DESPACHADOR",
-    "habilitacion instrumento": "Habilitacion de Instrumento",
-    "carrera piloto profesional": "CARRERA PILOTO",
+    "piloto privado":               "Piloto Privado (ENLS-1-CPP)",
+    "piloto comercial":             "Piloto Comercial",
+    "tripulante de cabina":         "Tripulante",
+    "despachador":                  "DESPACHADOR",
+    "habilitacion instrumento":     "Habilitacion de Instrumento",
+    "habilitacion monomotor":       "Habilitacion Monomotor",
+    "carrera piloto profesional":   "CARRERA PILOTO",
 }
 
 
@@ -61,13 +69,20 @@ def get_pdf_url_for_course(course_key: str) -> tuple[str, str, str] | None:
 
 
 def detect_course_from_message(message: str) -> str | None:
-    """Detecta qué curso está pidiendo el usuario basado en palabras clave."""
+    """Detecta qué curso está pidiendo el usuario basado en palabras clave.
+    
+    Recorre COURSE_KEYWORDS en orden (los más específicos primero).
+    Para cada curso verifica:
+      - Al menos UNA keyword de lista_any está en el mensaje
+      - TODAS las keywords de lista_all están en el mensaje
+    Devuelve el primer match.
+    """
     msg_lower = message.lower()
-    for course_key, keywords in COURSE_KEYWORDS.items():
-        if all(kw in msg_lower for kw in keywords) or any(kw in msg_lower for kw in keywords[:1]):
-            # Verificar que hay al menos la primera keyword (más específica)
-            if keywords[0] in msg_lower:
-                return course_key
+    for course_key, (any_kws, all_kws) in COURSE_KEYWORDS.items():
+        has_any = any(kw in msg_lower for kw in any_kws)
+        has_all = all(kw in msg_lower for kw in all_kws) if all_kws else True
+        if has_any and has_all:
+            return course_key
     return None
 
 
