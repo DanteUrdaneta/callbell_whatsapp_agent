@@ -1,3 +1,9 @@
+"""
+drive_reader.py
+Lee todos los PDFs de una carpeta de Google Drive y extrae su texto.
+Se ejecuta al iniciar el servidor y se refresca cada REFRESH_HOURS horas.
+"""
+
 import os
 import io
 import json
@@ -12,6 +18,8 @@ REFRESH_HOURS = 6
 _cotizaciones_cache: Optional[str] = None
 # Cache de metadatos: {nombre_archivo: file_id}
 _files_metadata: dict = {}
+# Cache de bytes de PDFs: {file_id: bytes}
+_pdf_bytes_cache: dict = {}
 
 # Palabras clave para detectar qué curso pide el usuario
 COURSE_KEYWORDS = {
@@ -150,6 +158,8 @@ def load_cotizaciones() -> str:
             try:
                 request = service.files().get_media(fileId=file["id"])
                 pdf_bytes = request.execute()
+                # Cachear bytes para servirlos directamente sin re-descargar
+                _pdf_bytes_cache[file["id"]] = pdf_bytes
                 text = _extract_text_from_pdf(pdf_bytes)
                 if text:
                     all_text.append(f"=== {file['name']} ===\n{text}")
@@ -178,11 +188,15 @@ def get_cotizaciones() -> str:
 
 
 def _download_pdf_from_drive_by_id(file_id: str) -> bytes | None:
-    """Descarga un PDF de Drive por file_id usando el service account."""
+    """Retorna bytes del PDF — primero desde cache en memoria, si no descarga de Drive."""
+    if file_id in _pdf_bytes_cache:
+        return _pdf_bytes_cache[file_id]
     try:
         service = _get_drive_service()
         request = service.files().get_media(fileId=file_id)
-        return request.execute()
+        data = request.execute()
+        _pdf_bytes_cache[file_id] = data
+        return data
     except Exception as e:
         print(f"❌ Error descargando PDF {file_id}: {e}")
         return None
