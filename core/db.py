@@ -122,18 +122,29 @@ class DB:
                 .maybe_single()
                 .execute()
             )
-            if response.data and "conversation" in response.data:
-                history = response.data["conversation"]
-                # Filtra entradas de recordatorios automáticos para no confundir al agente
-                clean_history = [
-                    msg for msg in history
-                    if msg.get("user_message") != "[RECORDATORIO AUTOMÁTICO]"
-                ]
-                return clean_history[-limit:] if clean_history else []
-            return []
+            # Guard against None response or missing data
+            if not response or not getattr(response, "data", None):
+                raise ValueError("No response data from Supabase")
+            data = response.data
+            if not isinstance(data, dict) or "conversation" not in data:
+                return []
+            history = data.get("conversation", []) or []
+            # Filter out automatic reminder entries
+            clean_history = [msg for msg in history if msg.get("user_message") != "[RECORDATORIO AUTOMÁTICO]"]
+            return clean_history[-limit:] if clean_history else []
         except Exception as e:
             print(f"⚠️ Error al obtener el historial jsonb: {str(e)}")
             return []
+
+    def delete_lead(self, phone_number: str) -> dict:
+        result = (
+            self.supabase.table(self.table_name)
+            .delete()
+            .eq("user_phone_number", phone_number)
+            .execute()
+        )
+        print(f"🗑️ Lead eliminado: {phone_number}")
+        return result.data
 
     def reset_lead(self, phone_number: str) -> dict:
         result = (
