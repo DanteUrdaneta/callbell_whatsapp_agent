@@ -37,7 +37,6 @@ db = DB(url=SUPABASE_URL, key=SUPABASE_KEY)
 MAX_CACHE_SIZE = 200
 processed_messages: deque = deque(maxlen=MAX_CACHE_SIZE)
 
-# Keywords para detectar que el usuario quiere un asesor
 ASESOR_KEYWORDS = [
     "asesor", "agente", "humano", "persona real", "hablar con alguien",
     "llamar", "llamame", "llámame", "quiero hablar", "me pueden llamar",
@@ -121,6 +120,7 @@ async def serve_pdf(request: Request, course_key: str):
         clean = f"{clean}.pdf"
 
     if request.method == "HEAD":
+        from fastapi.responses import Response
         return Response(
             content=b"",
             media_type="application/pdf",
@@ -131,6 +131,7 @@ async def serve_pdf(request: Request, course_key: str):
     if not pdf_bytes:
         raise HTTPException(status_code=500, detail="Error descargando PDF")
 
+    from fastapi.responses import Response
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
@@ -181,8 +182,20 @@ async def callbell_webhook(request: Request):
         elif normalized and not assigned_user:
             lead = db.get_lead(normalized)
             if lead and lead.get("status") == "success":
-                db.update_status(phone_number=normalized, status="onboarding")
-                print(f"👤 Asesor desasignado — lead vuelto a onboarding: {normalized}")
+                # Solo revertir si pasaron más de 30 segundos (evita race condition con escalado)
+                ultimo_mensaje = lead.get("ultimo_mensaje")
+                ahora = datetime.datetime.now(datetime.timezone.utc)
+                if ultimo_mensaje:
+                    ultimo_dt = datetime.datetime.fromisoformat(ultimo_mensaje.replace("Z", "+00:00"))
+                    segundos_diff = (ahora - ultimo_dt).total_seconds()
+                    if segundos_diff > 30:
+                        db.update_status(phone_number=normalized, status="onboarding")
+                        print(f"👤 Asesor desasignado — lead vuelto a onboarding: {normalized}")
+                    else:
+                        print(f"⏱️ Ignorando revert a onboarding — escalado reciente ({segundos_diff:.1f}s)")
+                else:
+                    db.update_status(phone_number=normalized, status="onboarding")
+                    print(f"👤 Asesor desasignado — lead vuelto a onboarding: {normalized}")
         return JSONResponse(status_code=200, content={"status": "ok"})
 
     if event == "conversation_closed":
@@ -249,12 +262,12 @@ async def callbell_webhook(request: Request):
 
         # ── FLUJO DE ESCALADO A ASESOR (hardcodeado, sin depender del modelo) ──
 
-        # PASO 2: Usuario ya dio nombre+número, estamos esperando confirmación
+        # PASO 2: Usuario confirmando número
         if lead_status == "esperando_confirmacion_asesor":
             msg_lower = user_message.lower().strip()
             confirma = any(kw in msg_lower for kw in ["si", "sí", "yes", "correcto", "exacto", "confirmo", "ok", "claro"])
             if confirma:
-                # Buscar el número en el historial reciente
+                # Buscar número en el historial reciente
                 numero_guardado = ""
                 for msg in reversed(db_history or []):
                     ai_msg = msg.get("ai_message", "") or ""
@@ -265,13 +278,17 @@ async def callbell_webhook(request: Request):
                             numero_guardado = numeros[0]
                             break
 
-                # Obtener nombre del historial
+                # Buscar nombre en el historial
                 nombre_guardado = ""
                 for msg in reversed(db_history or []):
-                    meta = msg.get("user_message", "") or ""
-                    if len(meta.split()) >= 1 and len(meta) < 50:
-                        nombre_guardado = meta.split()[0].capitalize()
-                        break
+                    user_msg = msg.get("user_message", "") or ""
+                    if user_msg and len(user_msg) < 50 and not user_msg.startswith("["):
+                        import re
+                        if re.search(r'\d{7,15}', user_msg):
+                            palabras = re.sub(r'[\d\-\s]+', ' ', user_msg).strip().split()
+                            if palabras:
+                                nombre_guardado = palabras[0].capitalize()
+                                break
 
                 respuesta = f"Perfecto, estoy conectándote con un asesor ahora mismo. Tendrás contacto en breve. Gracias, {nombre_guardado}." if nombre_guardado else "Perfecto, estoy conectándote con un asesor ahora mismo. Tendrás contacto en breve."
                 db.update_status(phone_number=lead_phone, status="success")
@@ -284,7 +301,7 @@ async def callbell_webhook(request: Request):
                 # No confirmó, volver a pedir datos
                 db.update_status(phone_number=lead_phone, status="onboarding")
 
-        # PASO 1b: Usuario ya dio datos (nombre+número), pedir confirmación
+        # PASO 1b: Usuario ya en espera de datos, buscar número
         if lead_status == "esperando_datos_asesor":
             import re
             numeros = re.findall(r'\d{7,15}', user_message)
@@ -296,7 +313,6 @@ async def callbell_webhook(request: Request):
                 await send_callbell_message(to_phone=lead_phone, text_content=respuesta)
                 return {"status": "success", "message": "Event processed"}
             else:
-                # No dio número, volver a pedir
                 respuesta = "Para conectarte con un asesor necesito tu nombre y número de teléfono. ¿Me los puedes dar?"
                 db.update_history_message(phone_number=lead_phone, user_message=user_message, ai_message=respuesta)
                 await send_callbell_message(to_phone=lead_phone, text_content=respuesta)
@@ -306,7 +322,11 @@ async def callbell_webhook(request: Request):
         if quiere_asesor(user_message):
             respuesta = "Con gusto, puedo conectarte con un asesor. Primero, ¿me puedes dar tu nombre y un número de contacto para que puedan comunicarse contigo?"
             db.update_status(phone_number=lead_phone, status="esperando_datos_asesor")
-            db.update_history_message(phone_number=lead_phone, user_message=user_message, ai_message=respuesta)
+            try:
+                db.update_history_message(phone_number=lead_phone, user_message=user_message, ai_message=respuesta)
+            except ValueError:
+                db.create_new_lead(lead_phone)
+                db.update_history_message(phone_number=lead_phone, user_message=user_message, ai_message=respuesta)
             await send_callbell_message(to_phone=lead_phone, text_content=respuesta)
             return {"status": "success", "message": "Event processed"}
 
