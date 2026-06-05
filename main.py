@@ -230,16 +230,13 @@ async def callbell_webhook(request: Request):
                 ai_message=ai_response.output,
             )
 
-        # Enviar PDF cuando el usuario acepta la oferta o lo pide explícitamente
+        # Enviar PDF cuando el usuario pregunta por detalles/cotización de un curso
         COTIZACION_KEYWORDS = [
             "cotizacion", "cotización", "pdf", "documento",
-            "envía el documento", "envia el documento",
-            "manda el pdf", "quiero el pdf", "dame el pdf",
-            "informacion completa", "información completa",
-            "me das la cotiz", "dame la cotiz", "quiero la cotiz",
-            "sí", "si", "claro", "sí por favor", "si por favor",
-            "mándamelo", "mandamelo", "mándala", "mandala",
-            "sí quiero", "si quiero", "me la mandas", "envíala", "enviala",
+            "detalles", "detalle", "precio", "precios", "costo", "cuanto cuesta", "cuánto cuesta",
+            "requisitos", "inscripcion", "inscripción", "informacion", "información",
+            "cuanto vale", "cuánto vale", "me das", "dime", "dame",
+            "sí", "si", "claro", "mándamelo", "mandamelo", "enviala", "envíala",
         ]
         pide_cotizacion = any(kw in user_message.lower() for kw in COTIZACION_KEYWORDS)
 
