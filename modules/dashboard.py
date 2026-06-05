@@ -7,12 +7,6 @@ AIRTABLE_ACCESS_TOKEN   = os.environ.get("AIRTABLE_ACCESS_TOKEN")
 AIRTABLE_DASHBOARD_BASE = os.environ.get("AIRTABLE_DASHBOARD_BASE_ID")
 DASHBOARD_TABLE_NAME    = "Dashboard"
 
-# Nombres exactos de los campos en Airtable (deben coincidir al 100%)
-FIELD_ACTIVOS    = "numero de usuarios activos"
-FIELD_EXITOSOS   = "numero de usuarios exitosos"
-FIELD_TOTAL      = "conversaciones totales"
-FIELD_TOKENS     = "tokens totales"
-
 
 def update_dashboard(db) -> None:
     """
@@ -40,23 +34,42 @@ def update_dashboard(db) -> None:
         api   = Api(AIRTABLE_ACCESS_TOKEN)
         table = api.table(AIRTABLE_DASHBOARD_BASE, DASHBOARD_TABLE_NAME)
 
+        # ── Leer campos reales y mapear dinámicamente ─────────────────────
+        records = table.all()
+        if not records:
+            print(f"⚠️ No hay records en Dashboard, no se puede actualizar")
+            return
+
+        real_fields = list(records[0].get("fields", {}).keys())
+        print(f"🔍 Campos reales en Airtable: {real_fields}")
+
+        # Buscar cada campo limpiando BOM y espacios extra
+        def find_field(keyword):
+            for name in real_fields:
+                clean = name.replace("\ufeff", "").strip()
+                if keyword.lower() in clean.lower():
+                    return name  # retorna el nombre ORIGINAL con BOM si lo tiene
+            return None
+
+        campo_activos  = find_field("activos")
+        campo_exitosos = find_field("exitosos")
+        campo_total    = find_field("conversaciones")
+        campo_tokens   = find_field("tokens")
+
+        print(f"📌 Campos mapeados: {campo_activos} | {campo_exitosos} | {campo_total} | {campo_tokens}")
+
+        if not all([campo_activos, campo_exitosos, campo_total, campo_tokens]):
+            print(f"⚠️ No se encontraron todos los campos. Disponibles: {real_fields}")
+            return
+
         fields = {
-            FIELD_ACTIVOS:  activos,
-            FIELD_EXITOSOS: exitosos,
-            FIELD_TOTAL:    total,
-            FIELD_TOKENS:   tokens_totales,
+            campo_activos:  activos,
+            campo_exitosos: exitosos,
+            campo_total:    total,
+            campo_tokens:   tokens_totales,
         }
 
-        # ── Leer campos reales del primer record para debug ───────────────
-        records = table.all()
-        if records:
-            real_fields = list(records[0].get("fields", {}).keys())
-            print(f"🔍 Campos reales en Airtable: {real_fields}")
-            table.update(records[0]["id"], fields)
-        else:
-            print(f"🔍 No hay records, creando uno nuevo...")
-            table.create(fields)
-
+        table.update(records[0]["id"], fields)
         print(f"✅ Dashboard actualizado correctamente")
 
     except Exception as e:
