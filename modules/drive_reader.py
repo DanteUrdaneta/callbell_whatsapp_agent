@@ -42,11 +42,9 @@ COURSE_FILE_KEYWORDS = {
 }
 
 
-def get_pdf_url_for_course(course_key: str) -> tuple[str, str] | None:
+def get_pdf_url_for_course(course_key: str) -> tuple[str, str, str] | None:
     """
-    Retorna (url_descarga, nombre_archivo) para el curso dado.
-    La URL de Drive para descarga pública es:
-    https://drive.google.com/uc?export=download&id=FILE_ID
+    Retorna (url_descarga, nombre_archivo, file_id) para el curso dado.
     """
     if not _files_metadata:
         return None
@@ -55,7 +53,7 @@ def get_pdf_url_for_course(course_key: str) -> tuple[str, str] | None:
     for filename, file_id in _files_metadata.items():
         if file_keyword and file_keyword.upper() in filename.upper():
             url = f"https://drive.google.com/uc?export=download&id={file_id}"
-            return url, filename
+            return url, filename, file_id
 
     return None
 
