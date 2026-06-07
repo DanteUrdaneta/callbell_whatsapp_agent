@@ -1,21 +1,27 @@
+import re
+import asyncio
+import datetime
+import traceback
+import urllib.parse
 from contextlib import asynccontextmanager
 from collections import deque
-import datetime
+
+import httpx
 from fastapi import FastAPI, Request, status, HTTPException
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
-from core.callbell import send_callbell_message, escalate_to_success
-from core.scheduler import start_scheduler
-from dotenv import load_dotenv
-from core.db import DB
 from pydantic import BaseModel, Field
 from typing import Dict, Any, Optional, List
-from modules.tools import history
-from agents import agent
+from dotenv import load_dotenv
 from groq import AsyncGroq
-import traceback
-import httpx
+
+from core.callbell import send_callbell_message, send_callbell_document, escalate_to_success
+from core.scheduler import start_scheduler
+from core.db import DB
+from modules.tools import history
+from agents import agent, db  # FIX: reutilizar la instancia de db de agents.py en lugar de crear una nueva
+
 import os
 
 load_dotenv()
@@ -32,7 +38,6 @@ BASE_URL = os.environ.get("BASE_URL") or (
 )
 
 groq_client = AsyncGroq(api_key=os.environ.get("GROQ_API_KEY"))
-db = DB(url=SUPABASE_URL, key=SUPABASE_KEY)
 
 MAX_CACHE_SIZE = 200
 processed_messages: deque = deque(maxlen=MAX_CACHE_SIZE)
@@ -52,9 +57,9 @@ def quiere_asesor(texto: str) -> bool:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    import asyncio
     from modules.drive_reader import load_cotizaciones
-    loop = asyncio.get_event_loop()
+    # FIX: usar get_running_loop() en lugar del deprecado get_event_loop()
+    loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, load_cotizaciones)
     start_scheduler(db)
     yield
@@ -103,8 +108,6 @@ async def index():
 
 @app.api_route("/pdf/{course_key:path}", methods=["GET", "HEAD"])
 async def serve_pdf(request: Request, course_key: str):
-    import urllib.parse
-    from fastapi.responses import Response
     from modules.drive_reader import get_pdf_url_for_course, _download_pdf_from_drive_by_id
 
     course_key = urllib.parse.unquote(course_key)
@@ -114,13 +117,11 @@ async def serve_pdf(request: Request, course_key: str):
 
     _, matched_name, matched_id = pdf_info
 
-    import re as _re
-    clean = _re.sub(r'^\d+\s+', '', matched_name.strip())
+    clean = re.sub(r'^\d+\s+', '', matched_name.strip())
     if not clean.lower().endswith(".pdf"):
         clean = f"{clean}.pdf"
 
     if request.method == "HEAD":
-        from fastapi.responses import Response
         return Response(
             content=b"",
             media_type="application/pdf",
@@ -131,7 +132,6 @@ async def serve_pdf(request: Request, course_key: str):
     if not pdf_bytes:
         raise HTTPException(status_code=500, detail="Error descargando PDF")
 
-    from fastapi.responses import Response
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
@@ -182,7 +182,6 @@ async def callbell_webhook(request: Request):
         elif normalized and not assigned_user:
             lead = db.get_lead(normalized)
             if lead and lead.get("status") == "success":
-                # Solo revertir si pasaron más de 30 segundos (evita race condition con escalado)
                 ultimo_mensaje = lead.get("ultimo_mensaje")
                 ahora = datetime.datetime.now(datetime.timezone.utc)
                 if ultimo_mensaje:
@@ -267,32 +266,48 @@ async def callbell_webhook(request: Request):
             msg_lower = user_message.lower().strip()
             confirma = any(kw in msg_lower for kw in ["si", "sí", "yes", "correcto", "exacto", "confirmo", "ok", "claro"])
             if confirma:
-                # Buscar número en el historial reciente
+                # FIX: regex mejorado para capturar números con o sin espacios/guiones
                 numero_guardado = ""
                 for msg in reversed(db_history or []):
                     ai_msg = msg.get("ai_message", "") or ""
                     if "confirmas" in ai_msg.lower() or "¿es" in ai_msg.lower():
-                        import re
-                        numeros = re.findall(r'\d{7,15}', ai_msg)
+                        # Eliminar espacios y guiones entre dígitos antes de buscar
+                        ai_msg_clean = re.sub(r'(\d)[\s\-](\d)', r'\1\2', ai_msg)
+                        numeros = re.findall(r'\d{7,15}', ai_msg_clean)
                         if numeros:
                             numero_guardado = numeros[0]
                             break
 
-                # Buscar nombre en el historial
+                # FIX: buscar nombre en historial de forma más robusta
+                # Se busca en mensajes previos donde el usuario dio su nombre explícitamente
                 nombre_guardado = ""
                 for msg in reversed(db_history or []):
-                    user_msg = msg.get("user_message", "") or ""
-                    if user_msg and len(user_msg) < 50 and not user_msg.startswith("["):
-                        import re
-                        if re.search(r'\d{7,15}', user_msg):
-                            palabras = re.sub(r'[\d\-\s]+', ' ', user_msg).strip().split()
-                            if palabras:
-                                nombre_guardado = palabras[0].capitalize()
+                    ai_msg = msg.get("ai_message", "") or ""
+                    # El mensaje de solicitud de datos es el que preguntó nombre y número
+                    if "nombre" in ai_msg.lower() and "número" in ai_msg.lower():
+                        # El mensaje del usuario justo después de esa pregunta contiene el nombre
+                        idx = (db_history or []).index(msg)
+                        # Buscar el siguiente mensaje del usuario en el historial
+                        for siguiente in (db_history or [])[idx:]:
+                            user_msg = siguiente.get("user_message", "") or ""
+                            if user_msg and not user_msg.startswith("["):
+                                # Extraer la parte que no es número ni puntuación
+                                nombre_candidato = re.sub(r'[\d\-\+\s,\.]+', ' ', user_msg).strip()
+                                palabras = nombre_candidato.split()
+                                if palabras:
+                                    nombre_guardado = palabras[0].capitalize()
                                 break
+                        if nombre_guardado:
+                            break
 
-                respuesta = f"Perfecto, estoy conectándote con un asesor ahora mismo. Tendrás contacto en breve. Gracias, {nombre_guardado}." if nombre_guardado else "Perfecto, estoy conectándote con un asesor ahora mismo. Tendrás contacto en breve."
+                respuesta = (
+                    f"Perfecto, estoy conectándote con un asesor ahora mismo. Tendrás contacto en breve. Gracias, {nombre_guardado}."
+                    if nombre_guardado
+                    else "Perfecto, estoy conectándote con un asesor ahora mismo. Tendrás contacto en breve."
+                )
                 db.update_status(phone_number=lead_phone, status="success")
-                escalate_to_success(lead_uuid)
+                # FIX: await porque escalate_to_success es ahora async
+                await escalate_to_success(lead_uuid)
                 db.update_history_message(phone_number=lead_phone, user_message=user_message, ai_message=respuesta)
                 await send_callbell_message(to_phone=lead_phone, text_content=respuesta)
                 print(f"✅ Lead escalado a asesor: {lead_phone}")
@@ -303,8 +318,9 @@ async def callbell_webhook(request: Request):
 
         # PASO 1b: Usuario ya en espera de datos, buscar número
         if lead_status == "esperando_datos_asesor":
-            import re
-            numeros = re.findall(r'\d{7,15}', user_message)
+            # FIX: regex mejorado — eliminar separadores entre dígitos antes de buscar
+            msg_clean = re.sub(r'(\d)[\s\-](\d)', r'\1\2', user_message)
+            numeros = re.findall(r'\d{7,15}', msg_clean)
             if numeros:
                 numero = numeros[0]
                 respuesta = f"Quiero asegurarme de tener bien tu número, ¿me lo confirmas? ¿Es {numero}?"
@@ -344,7 +360,6 @@ async def callbell_webhook(request: Request):
                 print(f"⚠️ No se pudo obtener CONFIG: {e}")
 
         from modules.drive_reader import detect_course_from_message, get_pdf_url_for_course, get_multi_sede_courses, _normalize, _course_file_map
-        from core.callbell import send_callbell_document
 
         COTIZACION_KEYWORDS = [
             "cotizacion", "cotización", "pdf", "documento",
@@ -416,12 +431,10 @@ async def callbell_webhook(request: Request):
                     respuesta_pdf = "Por el momento no tengo la cotización de ese curso disponible. Contáctanos al 829-535-1000 o info@enalas.com."
                 else:
                     pdf_url, pdf_name, pdf_file_id = pdf_info
-                    import re as _re
-                    import urllib.parse as _up
-                    real_name = _re.sub(r'^\d+\s+', '', pdf_name.strip())
+                    real_name = re.sub(r'^\d+\s+', '', pdf_name.strip())
                     if not real_name.lower().endswith(".pdf"):
                         real_name = f"{real_name}.pdf"
-                    self_url = f"{BASE_URL}/pdf/{_up.quote(course_key)}"
+                    self_url = f"{BASE_URL}/pdf/{urllib.parse.quote(course_key)}"
                     await send_callbell_document(
                         to_phone=lead_phone,
                         file_url=self_url,
@@ -477,25 +490,32 @@ async def callbell_webhook(request: Request):
         except Exception as e:
             print(f"⚠️ Error en dashboard: {e}")
 
+        # Limpiar markdown de la respuesta antes de enviar por WhatsApp
         clean_response = ai_response.output
-        import re
         clean_response = re.sub(r'\*+([^*]+)\*+', r'\1', clean_response)
         clean_response = re.sub(r'_+([^_]+)_+', r'\1', clean_response)
         clean_response = re.sub(r'^#{1,6}\s+', '', clean_response, flags=re.MULTILINE)
-        clean_response = re.sub(r'\\\(.*?\\\)', lambda m: m.group(0)
-            .replace('\\(', '').replace('\\)', '')
-            .replace('\\,', ' ').replace('\\text{', '').replace('}', '')
-            .replace('\\times', 'x').replace('\\approx', '≈').strip(),
-            clean_response)
+        clean_response = re.sub(
+            r'\\\(.*?\\\)',
+            lambda m: m.group(0)
+                .replace('\\(', '').replace('\\)', '')
+                .replace('\\,', ' ').replace('\\text{', '').replace('}', '')
+                .replace('\\times', 'x').replace('\\approx', '≈').strip(),
+            clean_response
+        )
         clean_response = re.sub(r'\\text\{([^}]+)\}', r'\1', clean_response)
         clean_response = re.sub(r'\\times', 'x', clean_response)
         clean_response = re.sub(r'\\approx', '≈', clean_response)
         clean_response = re.sub(r'\\,', ' ', clean_response)
-        clean_response = re.sub(r'\\\[.*?\\\]', lambda m: m.group(0)
-            .replace('\\[', '').replace('\\]', '')
-            .replace('\\,', ' ').replace('\\text{', '').replace('}', '')
-            .replace('\\times', 'x').replace('\\approx', '≈').strip(),
-            clean_response, flags=re.DOTALL)
+        clean_response = re.sub(
+            r'\\\[.*?\\\]',
+            lambda m: m.group(0)
+                .replace('\\[', '').replace('\\]', '')
+                .replace('\\,', ' ').replace('\\text{', '').replace('}', '')
+                .replace('\\times', 'x').replace('\\approx', '≈').strip(),
+            clean_response,
+            flags=re.DOTALL
+        )
         clean_response = re.sub(r'^\s*-\s+', '• ', clean_response, flags=re.MULTILINE)
 
         await send_callbell_message(to_phone=lead_phone, text_content=clean_response)
