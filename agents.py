@@ -15,7 +15,7 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 db = DB(url=SUPABASE_URL, key=SUPABASE_KEY)
 
 model = OpenAIModel(
-    "gpt-5-mini",
+    "gpt-4o-mini",  # ✅ CORREGIDO: era "gpt-5-mini" (no existe)
     provider=OpenAIProvider(api_key=os.environ.get("OPENAI_API_KEY")),
 )
 
