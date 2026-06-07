@@ -117,6 +117,8 @@ DESCUENTOS → descuentos activos. Solo menciona un descuento si está marcado c
 
 CONFIG → tasa de cambio. Nunca uses una tasa recordada de mensajes anteriores. Siempre consulta CONFIG en el momento.
 
+REGLA CRÍTICA DE SEDE: Cuando consultes RESUMEN, CURSOS o GRUPOS para el curso de Piloto Privado, SIEMPRE pasa el parámetro sede con la sede que el usuario eligió (ejemplo: sede="punta cana" o sede="santo domingo"). NUNCA llames a esas tablas sin sede para Piloto Privado — si no sabes la sede, no consultes la herramienta todavía.
+
 Si una herramienta devuelve algo que empiece con:
 
 INTERNAL:
@@ -259,9 +261,11 @@ agent = Agent(model, system_prompt=build_system_prompt())
 
 
 @agent.tool
-def get_table_information_airtable(ctx: RunContext, table_name: str) -> list:
-    """Obtiene información de las tablas de Airtable: RESUMEN, CONFIG, CURSOS, GRUPOS, DESCUENTOS"""
-    return get_table(table_name)
+def get_table_information_airtable(ctx: RunContext, table_name: str, sede: str = "") -> list:
+    """Obtiene información de las tablas de Airtable: RESUMEN, CONFIG, CURSOS, GRUPOS, DESCUENTOS.
+    Usa el parámetro sede (ej: 'punta cana' o 'santo domingo') para filtrar resultados
+    cuando el usuario ya eligió una sede. Si no aplica, dejar vacío."""
+    return get_table(table_name, sede=sede if sede else None)
 
 
 @agent.tool
