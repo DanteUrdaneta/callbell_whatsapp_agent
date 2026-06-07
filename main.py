@@ -23,7 +23,7 @@ from modules.tools import history
 from agents import agent, db  # FIX: reutilizar la instancia de db de agents.py en lugar de crear una nueva
 
 import os
-
+import random
 load_dotenv()
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
@@ -413,7 +413,18 @@ async def callbell_webhook(request: Request):
                             break
 
         pdf_enviado = False
-        respuesta_pdf = None
+
+        PDF_RESPONSES = [
+            "Ya te envié la cotización 😊",
+            "Te acabo de compartir el documento con toda la información.",
+            "Listo, ahí la tienes. Revísala con calma y me comentas cualquier duda.",
+            "Perfecto, ya te mandé la cotización completa.",
+            "Te la envié hace un momento. Si quieres te explico cualquier parte.",
+            "Acabo de enviarte la cotización. Estoy pendiente por si tienes preguntas.",
+            "Ya la tienes en el chat 😊",
+        ]
+        
+        respuesta_pdf = random.choice(PDF_RESPONSES)
 
         if pide_cotizacion:
             course_key = detect_course_from_message(user_message.lower())
