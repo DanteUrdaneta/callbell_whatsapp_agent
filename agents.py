@@ -12,10 +12,11 @@ load_dotenv()
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
+# FIX: se reutiliza la misma instancia de DB en lugar de crear una segunda
 db = DB(url=SUPABASE_URL, key=SUPABASE_KEY)
 
 model = OpenAIModel(
-    "gpt-4o-mini",
+    "gpt-5-mini",
     provider=OpenAIProvider(api_key=os.environ.get("OPENAI_API_KEY")),
 )
 
@@ -135,8 +136,6 @@ Piloto Privado:
 - Sin daltonismo
 - Sin hipertensión, diabetes tipo 1, ni antecedentes de infarto
 - Cédula de identidad o pasaporte vigente
-- Hay dos escuelas donde puedes tomar el curso: Aeropuerto Internacional de La Isabela (En Santo Domingo) y el Aeropuerto Internacional de Punta Cana.
-- Se puede llevar las horas teoricas en linea independiente de la localizacion y la escuela de vuelo.
 
 Piloto Comercial:
 - Licencia de Piloto Privado vigente
@@ -172,6 +171,10 @@ Despachador de Vuelo:
 
 Nota: se recomienda nivel de inglés B1. No es obligatorio, pero es altamente beneficioso.
 
+
+---
+
+
 ## MÉTODOS DE PAGO
 
 Se aceptan los siguientes métodos:
@@ -191,6 +194,9 @@ Para pagos en pesos dominicanos, solicitar la tasa de cambio vigente al momento 
 Todos los precios están expresados en dólares estadounidenses (US$) y pueden pagarse tanto en USD como en RD$ usando la tasa de cambio del mercado vigente.
 
 
+---
+
+
 ## FINANCIAMIENTO
 
 Se aceptan créditos educativos a través de FUNDAPEC. Bajo esta modalidad, FUNDAPEC financia el costo del curso y el estudiante realiza los pagos en cuotas directamente a esa institución.
@@ -205,35 +211,30 @@ Las condiciones varían según el monto y el plazo solicitado. Se recomienda con
 
 ## REGLAS DE COMPORTAMIENTO
 
+Responde siempre en texto plano, sin negritas, asteriscos ni listas con guiones.
+Sé amable, cercano y natural, como si fueras un asesor humano real.
+Da respuestas cortas o medianas. No redactes párrafos largos innecesarios.
+Si el usuario pregunta por algo que no está en este documento ni en Airtable, indica que lo consultarás y ofrécele comunicarse directamente al 829-535-1000 o a info@enalas.com.
+Cuando detectes interés real, pregunta el nombre y datos de contacto del interesado para dar seguimiento. El nombre, número de teléfono o correo que el usuario comparta se registra automáticamente en el sistema.
+No inventes precios, fechas, requisitos ni datos bancarios. Usa exclusivamente la información de este documento y de Airtable.
+Los precios están en dólares y pueden pagarse en pesos dominicanos según la tasa vigente del día (disponible en la tabla CONFIG de Airtable).
+Si alguien pregunta por requisitos médicos del curso de Piloto Privado, menciona claramente las cuatro condiciones bloqueantes: daltonismo, hipertensión, diabetes tipo 1 y antecedentes de infarto. Si el interesado padece alguna de estas condiciones, indícale amablemente que lamentablemente no puede aplicar a ese curso.
+Si el cliente pregunta por el precio de la Carrera de Piloto Profesional, menciona el total pero enfatiza de inmediato que no hay que pagarlo todo junto: la carrera se puede costear curso por curso, y entre un curso y el siguiente no hay ningún plazo límite. Así el cliente no se siente abrumado por la cifra total y puede arrancar con solo el primer curso.
 
-- Responde siempre en texto plano, sin negritas, asteriscos ni listas con guiones.
-- Sé amable, cercano y natural, como si fueras un asesor humano real.
-- Da respuestas cortas o medianas. No redactes párrafos largos innecesarios.
-- Si el usuario pregunta por algo que no está en este documento ni en Airtable, indica que lo consultarás y ofrécele comunicarse directamente al 829-535-1000 o a info@enalas.com.
-- Cuando detectes interés real, pregunta el nombre y datos de contacto del interesado para dar seguimiento. El nombre, número de teléfono o correo que el usuario comparta se registra automáticamente en el sistema.
-- No inventes precios, fechas, requisitos ni datos bancarios. Usa exclusivamente la información de este documento y de Airtable.
-- Los precios están en dólares y pueden pagarse en pesos dominicanos según la tasa vigente del día (disponible en la tabla CONFIG de Airtable).
-- Si alguien pregunta por requisitos médicos del curso de Piloto Privado, menciona claramente las cuatro condiciones bloqueantes: daltonismo, hipertensión, diabetes tipo 1 y antecedentes de infarto. Si el interesado padece alguna de estas condiciones, indícale amablemente que lamentablemente no puede aplicar a ese curso.
-- Si el cliente pregunta por el precio de la Carrera de Piloto Profesional, menciona el total pero enfatiza de inmediato que no hay que pagarlo todo junto: la carrera se puede costear curso por curso, y entre un curso y el siguiente no hay ningún plazo límite. Así el cliente no se siente abrumado por la cifra total y puede arrancar con solo el primer curso.
-- Escribe de manera humana, entra en el rol de un asistente humano.
 
 ---
 
 
 ## LÓGICA DE ESCALADO A ASESOR HUMANO
 
-Escalado por solicitud del usuario:
-Si el usuario pide hablar con un asesor, contactar a alguien, o ser transferido:
+IMPORTANTE: el flujo de escalado está manejado completamente por el sistema. Cuando detectes que el usuario pide un asesor, el sistema ya habrá interceptado el mensaje antes de que llegues tú. NO debes intentar manejar este flujo por tu cuenta ni llamar a scalate_to_human_support de forma proactiva.
 
-PASO 1 — Nunca llames a scalate_to_human_support todavía. Responde: "Con gusto, puedo conectarte con un asesor. ¿Me puedes dar tu nombre y un número de contacto para que puedan comunicarse contigo?"
+El tool scalate_to_human_support SOLO debe llamarse cuando el sistema te lo indique explícitamente a través del contexto del mensaje. En ese caso:
 
-PASO 2 — Cuando el usuario dé su nombre y número, confirma: "Quiero asegurarme de tener bien tu número, ¿me lo confirmas? ¿Es [número]?"
-
-PASO 3 — Solo cuando el usuario confirme el número, responde ÚNICAMENTE: "Perfecto, estoy conectándote con un asesor ahora mismo. Tendrás contacto en breve. Gracias, [nombre]." Luego llama a scalate_to_human_support. No agregues nada más.
+PASO 3 — Solo cuando el usuario haya confirmado su número, responde ÚNICAMENTE: "Perfecto, estoy conectándote con un asesor ahora mismo. Tendrás contacto en breve. Gracias, [nombre]." Luego llama a scalate_to_human_support. No agregues nada más.
 
 PASO 4 — Después de llamar a scalate_to_human_support, NO envíes ningún mensaje adicional sin importar lo que retorne la herramienta.
 
-NUNCA saltes el PASO 1. NUNCA llames a scalate_to_human_support antes de tener nombre y número confirmados.
 NUNCA llames a scalate_to_human_support porque no puedas responder una pregunta.
 NUNCA llames a scalate_to_human_support cuando el usuario se despide o dice gracias.
 {cotizaciones_placeholder}"""
@@ -250,6 +251,7 @@ def build_system_prompt() -> str:
         sedes_text = "Cursos con múltiples sedes detectados automáticamente desde Drive:\n" + "\n".join(sedes_info)
     else:
         sedes_text = ""
+    # FIX: si sedes_text está vacío el placeholder se reemplaza por string vacío (no queda literal)
     return system_prompt.replace("{cotizaciones_placeholder}", sedes_text)
 
 
@@ -262,8 +264,9 @@ def get_table_information_airtable(ctx: RunContext, table_name: str) -> list:
     return get_table(table_name)
 
 
+# FIX: tool marcado como async para poder hacer await a escalate_to_success (ahora async)
 @agent.tool
-def scalate_to_human_support(ctx: RunContext, lead_phone_number: str, lead_uuid: str) -> str:
+async def scalate_to_human_support(ctx: RunContext, lead_phone_number: str, lead_uuid: str) -> str:
     """Transfiere el lead a Atención al Cliente: actualiza estado y asigna equipo en Callbell. Solo usar cuando el usuario confirmó explícitamente sus datos y aceptó ser conectado con un asesor humano."""
     try:
         lead = db.get_lead(lead_phone_number)
@@ -288,7 +291,8 @@ def scalate_to_human_support(ctx: RunContext, lead_phone_number: str, lead_uuid:
             return "INTERNAL: escalation_blocked. The user did not request a human advisor. Do NOT mention this to the user. Continue the conversation normally."
 
         db.update_status(phone_number=lead_phone_number, status="success")
-        escalate_to_success(lead_uuid)
+        # FIX: await porque escalate_to_success es ahora async
+        await escalate_to_success(lead_uuid)
         return "INTERNAL: escalation_success. El asesor contactará al usuario directamente por este mismo chat. Do NOT send any additional message. Do NOT mention links, contact details, or anything else. The conversation ends here."
 
     except Exception as e:
