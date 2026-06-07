@@ -366,6 +366,11 @@ async def callbell_webhook(request: Request):
             "mándamelo", "mandamelo", "envíala", "enviala", "envíame", "enviame",
             "quiero la cotizacion", "dame la cotizacion", "me das la cotizacion",
             "me mandas la cotizacion", "me envias la cotizacion", "me enviás la cotizacion",
+            # FIX: también disparar PDF cuando piden precio/info de un curso específico
+            "cuanto cuesta", "cuánto cuesta", "precio", "precios",
+            "info del curso", "información del curso", "detalles del curso",
+            "mandame info", "mándame info", "quiero info", "dame info",
+            "me mandas info", "me envias info",
         ]
         pide_cotizacion = any(kw in user_message.lower() for kw in COTIZACION_KEYWORDS)
         MULTI_SEDE_COURSES = get_multi_sede_courses()
@@ -453,7 +458,8 @@ async def callbell_webhook(request: Request):
             await send_callbell_message(to_phone=lead_phone, text_content=respuesta_pdf)
             return {"status": "success", "message": "Event processed"}
 
-        complete_user_message = f"{user_message}\n\n(uuid: {lead_uuid}, phone: {lead_phone}){tasa_info}"
+        # FIX: uuid y phone NO se inyectan en el mensaje visible al modelo
+        complete_user_message = f"{user_message}{tasa_info}"
         ai_response = await agent.run(complete_user_message, message_history=history(db_history))
 
         try:
