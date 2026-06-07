@@ -360,35 +360,83 @@ async def callbell_webhook(request: Request):
             "me mandas info", "me envias info",
         ]
         pide_cotizacion = any(kw in user_message.lower() for kw in COTIZACION_KEYWORDS)
+
         MULTI_SEDE_COURSES = get_multi_sede_courses()
+
+        # ── FLUJO DE SEDE (stateful, igual que el flujo de asesor) ──────────────
+        # Si el lead está esperando elegir sede, resolver eso antes que nada
+        if lead_status and lead_status.startswith("esperando_sede:"):
+            pending_course = lead_status.replace("esperando_sede:", "").strip()
+            msg_norm = _normalize(user_message)
+
+            sede_elegida = None
+            if "isabela" in msg_norm or "santo domingo" in msg_norm:
+                sede_elegida = "santo domingo"
+            elif "punta cana" in msg_norm:
+                sede_elegida = "punta cana"
+
+            if sede_elegida:
+                full_key = f"{pending_course} {sede_elegida}"
+                db.update_status(phone_number=lead_phone, status="onboarding")
+                if full_key in _course_file_map and pide_cotizacion:
+                    # Enviar PDF de la sede elegida
+                    pdf_info = get_pdf_url_for_course(full_key)
+                    if pdf_info:
+                        pdf_url, pdf_name, pdf_file_id = pdf_info
+                        real_name = re.sub(r'^\d+\s+', '', pdf_name.strip())
+                        if not real_name.lower().endswith(".pdf"):
+                            real_name = f"{real_name}.pdf"
+                        self_url = f"{BASE_URL}/pdf/{urllib.parse.quote(full_key)}"
+                        await send_callbell_document(to_phone=lead_phone, file_url=self_url, filename=real_name)
+                        print(f"📎 PDF enviado tras elegir sede: {real_name}")
+                        respuesta_sede = random.choice([
+                            "Ya te envié la cotización.",
+                            "Listo, ahí la tienes. Revísala con calma y me comentas cualquier duda.",
+                            "Acabo de enviarte la cotización. Estoy pendiente por si tienes preguntas.",
+                        ])
+                        try:
+                            db.update_history_message(phone_number=lead_phone, user_message=user_message, ai_message=respuesta_sede)
+                        except ValueError:
+                            db.create_new_lead(lead_phone)
+                            db.update_history_message(phone_number=lead_phone, user_message=user_message, ai_message=respuesta_sede)
+                        await send_callbell_message(to_phone=lead_phone, text_content=respuesta_sede)
+                        return {"status": "success", "message": "Event processed"}
+                # Si no pide cotización, dejar que el agente responda con la sede inyectada
+                user_message = f"{user_message} [sede elegida: {sede_elegida}]"
+            else:
+                # No entendió la sede, volver a preguntar
+                sedes = sorted([k.replace(pending_course, "").strip().title()
+                               for k in _course_file_map.keys()
+                               if k.startswith(pending_course + " ")])
+                sedes_str = " o ".join(sedes)
+                repregunta = f"Disculpa, no entendí bien. ¿El curso lo tomarías en {sedes_str}?"
+                try:
+                    db.update_history_message(phone_number=lead_phone, user_message=user_message, ai_message=repregunta)
+                except ValueError:
+                    db.create_new_lead(lead_phone)
+                    db.update_history_message(phone_number=lead_phone, user_message=user_message, ai_message=repregunta)
+                await send_callbell_message(to_phone=lead_phone, text_content=repregunta)
+                return {"status": "success", "message": "Event processed"}
+        # ── Fin flujo sede ──────────────────────────────────────────────────────
 
         detected_course = detect_course_from_message(user_message.lower())
 
-        # Si el usuario menciona un curso con múltiples sedes, preguntar la sede SIEMPRE,
-        # sin importar si pide cotización, precio u otra información. Nunca dar datos sin saber la sede.
+        # Si se detecta un curso multi-sede y el usuario no indicó la sede, preguntar y bloquear
         if detected_course and detected_course in MULTI_SEDE_COURSES:
-            # Verificar si la sede ya viene mencionada en el mismo mensaje
-            sede_en_mensaje = None
             msg_norm = _normalize(user_message)
+            sede_en_mensaje = None
             if "isabela" in msg_norm or "santo domingo" in msg_norm:
                 sede_en_mensaje = "santo domingo"
             elif "punta cana" in msg_norm:
                 sede_en_mensaje = "punta cana"
 
-            if sede_en_mensaje:
-                # El usuario ya indicó la sede en el mismo mensaje, continuar normalmente
-                full_key = f"{detected_course} {sede_en_mensaje}"
-                if full_key in _course_file_map:
-                    if pide_cotizacion:
-                        user_message = f"{user_message} {full_key}"
-                    # Si no pide cotización, el agente responderá con info de esa sede
-            else:
-                # No se sabe la sede, preguntar antes de dar cualquier información
+            if not sede_en_mensaje:
                 sedes = sorted([k.replace(detected_course, "").strip().title()
                                for k in _course_file_map.keys()
                                if k.startswith(detected_course + " ")])
                 sedes_str = " o ".join(sedes)
                 pregunta_sede = f"El curso de {detected_course.title()} lo ofrecemos en dos sedes: {sedes_str}. ¿En cuál te interesa?"
+                db.update_status(phone_number=lead_phone, status=f"esperando_sede:{detected_course}")
                 try:
                     db.update_history_message(phone_number=lead_phone, user_message=user_message, ai_message=pregunta_sede)
                 except ValueError:
@@ -396,6 +444,11 @@ async def callbell_webhook(request: Request):
                     db.update_history_message(phone_number=lead_phone, user_message=user_message, ai_message=pregunta_sede)
                 await send_callbell_message(to_phone=lead_phone, text_content=pregunta_sede)
                 return {"status": "success", "message": "Event processed"}
+            else:
+                # Sede ya mencionada en el mensaje, inyectar en el mensaje del agente
+                full_key = f"{detected_course} {sede_en_mensaje}"
+                if full_key in _course_file_map and pide_cotizacion:
+                    user_message = f"{user_message} {full_key}"
 
         if not pide_cotizacion:
             SEDE_TRIGGER_PHRASES = ["isabela", "santo domingo", "punta cana", "la isabela"]
