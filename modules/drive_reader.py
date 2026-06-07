@@ -28,6 +28,15 @@ def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+# Mapeo explícito: si el nombre normalizado del PDF coincide con alguna de estas claves,
+# forzar la sede correspondiente. Esto cubre casos donde el PDF no tiene " - Sede" en el nombre.
+SEDE_ALIASES: dict[str, tuple[str, str]] = {
+    # nombre_normalizado_sin_extension -> (course_key, sede_key)
+    "cotizacion de curso piloto privado": ("cotizacion de curso piloto privado", "santo domingo"),
+    "cotizacion de curso piloto privado punta cana": ("cotizacion de curso piloto privado", "punta cana"),
+}
+
+
 def _parse_pdf_name(filename: str):
     """
     Dado el nombre de un PDF retorna (course_key, sede_key).
@@ -36,14 +45,19 @@ def _parse_pdf_name(filename: str):
     Ejemplos:
       '08 Cotizacion de Curso Piloto Privado - PUNTA CANA.pdf'
         -> ('cotizacion de curso piloto privado', 'punta cana')
-      '08 Cotizacion de Curso Piloto Privado - Santo Domingo(ENLS-1-CPP).pdf'
-        -> ('cotizacion de curso piloto privado', 'santo domingo')
+      '08 Cotizacion de Curso Piloto Privado.pdf'
+        -> ('cotizacion de curso piloto privado', 'santo domingo')  ← alias
       '11 Cotizacion de Curso Piloto Comercial (ENLS-1-CPC).pdf'
         -> ('cotizacion de curso piloto comercial', None)
     """
     name = re.sub(r"^\d+\s+", "", filename.strip())           # quitar prefijo numérico
     name = re.sub(r"\.pdf$", "", name, flags=re.IGNORECASE).strip()
     name = re.sub(r"\s*\([^)]*\)", "", name).strip()          # quitar (ENLS-1-CPP) etc.
+
+    # Verificar alias explícito primero (antes de intentar parsear " - ")
+    name_norm = _normalize(name)
+    if name_norm in SEDE_ALIASES:
+        return SEDE_ALIASES[name_norm]
 
     if " - " in name:
         parts = name.split(" - ", 1)
