@@ -481,10 +481,38 @@ async def callbell_webhook(request: Request):
                     last_ai = (db_history[-1].get("ai_message", "") or "")
                     course_key = detect_course_from_message(last_ai.lower())
 
+            # Si el curso es multi-sede, intentar resolver la sede desde el historial
             if course_key in MULTI_SEDE_COURSES:
-                # No se sabe la sede todavía — el flujo esperando_sede: ya preguntó.
-                # No pasar al agente para evitar que responda con ambas sedes.
-                return {"status": "success", "message": "Event processed"}
+                sede_resuelta = None
+                for msg in reversed(db_history or []):
+                    for field in ("user_message", "ai_message"):
+                        text = _normalize(msg.get(field, "") or "")
+                        if "santo domingo" in text or "isabela" in text:
+                            sede_resuelta = "santo domingo"
+                            break
+                        elif "punta cana" in text:
+                            sede_resuelta = "punta cana"
+                            break
+                    if sede_resuelta:
+                        break
+
+                if sede_resuelta:
+                    course_key = f"{course_key} {sede_resuelta}"
+                else:
+                    # No hay sede en el historial, preguntar
+                    sedes = sorted([k.replace(course_key, "").strip().title()
+                                   for k in _course_file_map.keys()
+                                   if k.startswith(course_key + " ")])
+                    sedes_str = " o ".join(sedes)
+                    pregunta = f"Para enviarte la cotización correcta, ¿el curso lo tomarías en {sedes_str}?"
+                    db.update_status(phone_number=lead_phone, status=f"esperando_sede:{course_key}")
+                    try:
+                        db.update_history_message(phone_number=lead_phone, user_message=user_message, ai_message=pregunta)
+                    except ValueError:
+                        db.create_new_lead(lead_phone)
+                        db.update_history_message(phone_number=lead_phone, user_message=user_message, ai_message=pregunta)
+                    await send_callbell_message(to_phone=lead_phone, text_content=pregunta)
+                    return {"status": "success", "message": "Event processed"}
 
             if course_key:
                 pdf_info = get_pdf_url_for_course(course_key)
