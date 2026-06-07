@@ -347,7 +347,7 @@ async def callbell_webhook(request: Request):
             except Exception as e:
                 print(f"⚠️ No se pudo obtener CONFIG: {e}")
 
-        from modules.drive_reader import detect_course_from_message, get_pdf_url_for_course, get_multi_sede_courses, _normalize, _course_file_map
+        from modules.drive_reader import detect_course_from_message, get_pdf_url_for_course, get_multi_sede_courses, _normalize, _course_file_map, get_course_display_name
 
         COTIZACION_KEYWORDS = [
             "cotizacion", "cotización", "pdf", "documento",
@@ -435,7 +435,7 @@ async def callbell_webhook(request: Request):
                                for k in _course_file_map.keys()
                                if k.startswith(detected_course + " ")])
                 sedes_str = " o ".join(sedes)
-                pregunta_sede = f"El curso de {detected_course.title()} lo ofrecemos en dos sedes: {sedes_str}. ¿En cuál te interesa?"
+                pregunta_sede = f"El curso de {get_course_display_name(detected_course)} lo ofrecemos en dos sedes: {sedes_str}. ¿En cuál te interesa?"
                 db.update_status(phone_number=lead_phone, status=f"esperando_sede:{detected_course}")
                 try:
                     db.update_history_message(phone_number=lead_phone, user_message=user_message, ai_message=pregunta_sede)
