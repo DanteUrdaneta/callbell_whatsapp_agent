@@ -120,7 +120,20 @@ USER_COURSE_ALIASES: dict[str, str] = {
 }
 
 
-def detect_course_from_message(message: str) -> str | None:
+# Nombre legible para mostrar al usuario por course_key
+COURSE_DISPLAY_NAMES: dict[str, str] = {
+    "cotizacion de curso piloto privado": "Piloto Privado",
+    "cotizacion de curso piloto comercial": "Piloto Comercial",
+    "cotizacion de curso habilitacion de instrumento": "Habilitación de Instrumento",
+    "cotizacion de curso despachador": "Despachador de Vuelo",
+    "cotizacion de curso tripulante de cabina": "Tripulante de Cabina",
+    "cotizacion carrera piloto profesional monomotor 2026": "Carrera de Piloto Profesional",
+}
+
+
+def get_course_display_name(course_key: str) -> str:
+    """Retorna el nombre legible del curso para mostrar al usuario."""
+    return COURSE_DISPLAY_NAMES.get(course_key, course_key.replace("cotizacion de curso ", "").title())
     """
     Detecta qué curso está pidiendo el usuario.
     Primero intenta con aliases amigables (lo que el usuario escribe),
