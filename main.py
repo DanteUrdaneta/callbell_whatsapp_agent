@@ -450,27 +450,7 @@ async def callbell_webhook(request: Request):
                 if full_key in _course_file_map and pide_cotizacion:
                     user_message = f"{user_message} {full_key}"
 
-        if not pide_cotizacion:
-            SEDE_TRIGGER_PHRASES = ["isabela", "santo domingo", "punta cana", "la isabela"]
-            if any(s in user_message.lower() for s in SEDE_TRIGGER_PHRASES):
-                history_check = db_history or []
-                last_ai = (history_check[-1].get("ai_message", "") or "") if history_check else ""
-                SEDE_QUESTION_HINTS = ["sede", "isabela", "punta cana", "santo domingo", "¿te interesa", "cuál prefieres", "cual prefieres", "cuál sede"]
-                if any(hint in last_ai.lower() for hint in SEDE_QUESTION_HINTS):
-                    for msg in reversed(history_check):
-                        combined = (msg.get("user_message", "") or "") + " " + (msg.get("ai_message", "") or "")
-                        pending_course = detect_course_from_message(combined.lower())
-                        if pending_course and pending_course in MULTI_SEDE_COURSES:
-                            sede_norm = _normalize(user_message)
-                            if "isabela" in sede_norm or "santo domingo" in sede_norm:
-                                sede_norm = "santo domingo"
-                            elif "punta cana" in sede_norm:
-                                sede_norm = "punta cana"
-                            full_key = f"{pending_course} {sede_norm}"
-                            if full_key in _course_file_map:
-                                pide_cotizacion = True
-                                user_message = f"{user_message} {full_key}"
-                            break
+        # (bloque de sede legacy eliminado — reemplazado por flujo stateful esperando_sede:)
 
         pdf_enviado = False
 
@@ -502,7 +482,9 @@ async def callbell_webhook(request: Request):
                     course_key = detect_course_from_message(last_ai.lower())
 
             if course_key in MULTI_SEDE_COURSES:
-                course_key = None
+                # No se sabe la sede todavía — el flujo esperando_sede: ya preguntó.
+                # No pasar al agente para evitar que responda con ambas sedes.
+                return {"status": "success", "message": "Event processed"}
 
             if course_key:
                 pdf_info = get_pdf_url_for_course(course_key)
