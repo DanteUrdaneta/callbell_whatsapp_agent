@@ -363,19 +363,39 @@ async def callbell_webhook(request: Request):
         MULTI_SEDE_COURSES = get_multi_sede_courses()
 
         detected_course = detect_course_from_message(user_message.lower())
+
+        # Si el usuario menciona un curso con múltiples sedes, preguntar la sede SIEMPRE,
+        # sin importar si pide cotización, precio u otra información. Nunca dar datos sin saber la sede.
         if detected_course and detected_course in MULTI_SEDE_COURSES:
-            sedes = sorted([k.replace(detected_course, "").strip().title()
-                           for k in _course_file_map.keys()
-                           if k.startswith(detected_course + " ")])
-            sedes_str = " o ".join(sedes)
-            pregunta_sede = f"Para darte la información correcta, ¿te interesa el curso en {sedes_str}?"
-            try:
-                db.update_history_message(phone_number=lead_phone, user_message=user_message, ai_message=pregunta_sede)
-            except ValueError:
-                db.create_new_lead(lead_phone)
-                db.update_history_message(phone_number=lead_phone, user_message=user_message, ai_message=pregunta_sede)
-            await send_callbell_message(to_phone=lead_phone, text_content=pregunta_sede)
-            return {"status": "success", "message": "Event processed"}
+            # Verificar si la sede ya viene mencionada en el mismo mensaje
+            sede_en_mensaje = None
+            msg_norm = _normalize(user_message)
+            if "isabela" in msg_norm or "santo domingo" in msg_norm:
+                sede_en_mensaje = "santo domingo"
+            elif "punta cana" in msg_norm:
+                sede_en_mensaje = "punta cana"
+
+            if sede_en_mensaje:
+                # El usuario ya indicó la sede en el mismo mensaje, continuar normalmente
+                full_key = f"{detected_course} {sede_en_mensaje}"
+                if full_key in _course_file_map:
+                    if pide_cotizacion:
+                        user_message = f"{user_message} {full_key}"
+                    # Si no pide cotización, el agente responderá con info de esa sede
+            else:
+                # No se sabe la sede, preguntar antes de dar cualquier información
+                sedes = sorted([k.replace(detected_course, "").strip().title()
+                               for k in _course_file_map.keys()
+                               if k.startswith(detected_course + " ")])
+                sedes_str = " o ".join(sedes)
+                pregunta_sede = f"El curso de {detected_course.title()} lo ofrecemos en dos sedes: {sedes_str}. ¿En cuál te interesa?"
+                try:
+                    db.update_history_message(phone_number=lead_phone, user_message=user_message, ai_message=pregunta_sede)
+                except ValueError:
+                    db.create_new_lead(lead_phone)
+                    db.update_history_message(phone_number=lead_phone, user_message=user_message, ai_message=pregunta_sede)
+                await send_callbell_message(to_phone=lead_phone, text_content=pregunta_sede)
+                return {"status": "success", "message": "Event processed"}
 
         if not pide_cotizacion:
             SEDE_TRIGGER_PHRASES = ["isabela", "santo domingo", "punta cana", "la isabela"]
@@ -402,15 +422,18 @@ async def callbell_webhook(request: Request):
         pdf_enviado = False
 
         PDF_RESPONSES = [
-            "Ya te envié la cotización ",
+            "Ya te envié la cotización.",
             "Te acabo de compartir el documento con toda la información.",
             "Listo, ahí la tienes. Revísala con calma y me comentas cualquier duda.",
             "Perfecto, ya te mandé la cotización completa.",
             "Te la envié hace un momento. Si quieres te explico cualquier parte.",
             "Acabo de enviarte la cotización. Estoy pendiente por si tienes preguntas.",
-            "Ya la tienes en el chat ",
+            "Ya la tienes en el chat.",
         ]
 
+        # ✅ FIX: empieza en None — solo se asigna si realmente se procesa una cotización.
+        # Antes era random.choice(PDF_RESPONSES) desde el inicio, lo que causaba que el bot
+        # enviara mensajes como "Ya la tienes en el chat 😊" aunque no hubiera enviado ningún PDF.
         respuesta_pdf = None
 
         if pide_cotizacion:
