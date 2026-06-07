@@ -58,7 +58,6 @@ def quiere_asesor(texto: str) -> bool:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from modules.drive_reader import load_cotizaciones
-    # FIX: usar get_running_loop() en lugar del deprecado get_event_loop()
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, load_cotizaciones)
     start_scheduler(db)
@@ -266,32 +265,24 @@ async def callbell_webhook(request: Request):
             msg_lower = user_message.lower().strip()
             confirma = any(kw in msg_lower for kw in ["si", "sí", "yes", "correcto", "exacto", "confirmo", "ok", "claro"])
             if confirma:
-                # FIX: regex mejorado para capturar números con o sin espacios/guiones
                 numero_guardado = ""
                 for msg in reversed(db_history or []):
                     ai_msg = msg.get("ai_message", "") or ""
                     if "confirmas" in ai_msg.lower() or "¿es" in ai_msg.lower():
-                        # Eliminar espacios y guiones entre dígitos antes de buscar
                         ai_msg_clean = re.sub(r'(\d)[\s\-](\d)', r'\1\2', ai_msg)
                         numeros = re.findall(r'\d{7,15}', ai_msg_clean)
                         if numeros:
                             numero_guardado = numeros[0]
                             break
 
-                # FIX: buscar nombre en historial de forma más robusta
-                # Se busca en mensajes previos donde el usuario dio su nombre explícitamente
                 nombre_guardado = ""
                 for msg in reversed(db_history or []):
                     ai_msg = msg.get("ai_message", "") or ""
-                    # El mensaje de solicitud de datos es el que preguntó nombre y número
                     if "nombre" in ai_msg.lower() and "número" in ai_msg.lower():
-                        # El mensaje del usuario justo después de esa pregunta contiene el nombre
                         idx = (db_history or []).index(msg)
-                        # Buscar el siguiente mensaje del usuario en el historial
                         for siguiente in (db_history or [])[idx:]:
                             user_msg = siguiente.get("user_message", "") or ""
                             if user_msg and not user_msg.startswith("["):
-                                # Extraer la parte que no es número ni puntuación
                                 nombre_candidato = re.sub(r'[\d\-\+\s,\.]+', ' ', user_msg).strip()
                                 palabras = nombre_candidato.split()
                                 if palabras:
@@ -306,19 +297,16 @@ async def callbell_webhook(request: Request):
                     else "Perfecto, estoy conectándote con un asesor ahora mismo. Tendrás contacto en breve."
                 )
                 db.update_status(phone_number=lead_phone, status="success")
-                # FIX: await porque escalate_to_success es ahora async
                 await escalate_to_success(lead_uuid)
                 db.update_history_message(phone_number=lead_phone, user_message=user_message, ai_message=respuesta)
                 await send_callbell_message(to_phone=lead_phone, text_content=respuesta)
                 print(f"✅ Lead escalado a asesor: {lead_phone}")
                 return {"status": "success", "message": "Event processed"}
             else:
-                # No confirmó, volver a pedir datos
                 db.update_status(phone_number=lead_phone, status="onboarding")
 
         # PASO 1b: Usuario ya en espera de datos, buscar número
         if lead_status == "esperando_datos_asesor":
-            # FIX: regex mejorado — eliminar separadores entre dígitos antes de buscar
             msg_clean = re.sub(r'(\d)[\s\-](\d)', r'\1\2', user_message)
             numeros = re.findall(r'\d{7,15}', msg_clean)
             if numeros:
@@ -366,7 +354,6 @@ async def callbell_webhook(request: Request):
             "mándamelo", "mandamelo", "envíala", "enviala", "envíame", "enviame",
             "quiero la cotizacion", "dame la cotizacion", "me das la cotizacion",
             "me mandas la cotizacion", "me envias la cotizacion", "me enviás la cotizacion",
-            # FIX: también disparar PDF cuando piden precio/info de un curso específico
             "cuanto cuesta", "cuánto cuesta", "precio", "precios",
             "info del curso", "información del curso", "detalles del curso",
             "mandame info", "mándame info", "quiero info", "dame info",
@@ -423,8 +410,11 @@ async def callbell_webhook(request: Request):
             "Acabo de enviarte la cotización. Estoy pendiente por si tienes preguntas.",
             "Ya la tienes en el chat 😊",
         ]
-        
-        respuesta_pdf = random.choice(PDF_RESPONSES)
+
+        # ✅ FIX: empieza en None — solo se asigna si realmente se procesa una cotización.
+        # Antes era random.choice(PDF_RESPONSES) desde el inicio, lo que causaba que el bot
+        # enviara mensajes como "Ya la tienes en el chat 😊" aunque no hubiera enviado ningún PDF.
+        respuesta_pdf = None
 
         if pide_cotizacion:
             course_key = detect_course_from_message(user_message.lower())
@@ -458,7 +448,7 @@ async def callbell_webhook(request: Request):
                     )
                     print(f"📎 PDF enviado: {real_name}")
                     pdf_enviado = True
-                    respuesta_pdf = "¡Aquí tienes la cotización! Si tienes alguna pregunta, con gusto te ayudo."
+                    respuesta_pdf = random.choice(PDF_RESPONSES)
 
         if respuesta_pdf is not None:
             try:
