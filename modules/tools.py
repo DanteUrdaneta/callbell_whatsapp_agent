@@ -11,10 +11,27 @@ AIRTABLE_BASE_ID      = os.environ.get("AIRTABLE_BASE_ID")
 
 VALID_TABLES = ["RESUMEN", "CONFIG", "CURSOS", "GRUPOS", "DESCUENTOS"]
 
-def get_table(table_name: str) -> list[dict]:
+# Campos de Airtable que pueden contener el nombre del curso
+COURSE_NAME_FIELDS = ["nombre", "curso", "name", "course", "Nombre", "Curso"]
+
+def _record_matches_sede(fields: dict, sede: str) -> bool:
     """
-    Obtiene todos los registros de una tabla de Airtable.
+    Retorna True si el registro pertenece a la sede indicada.
+    Busca en todos los campos de texto del registro.
+    """
+    sede_norm = sede.lower()
+    for value in fields.values():
+        if isinstance(value, str) and sede_norm in value.lower():
+            return True
+    return False
+
+def get_table(table_name: str, sede: str | None = None) -> list[dict]:
+    """
+    Obtiene registros de una tabla de Airtable.
     table_name debe ser uno de: RESUMEN, CONFIG, CURSOS, GRUPOS, DESCUENTOS
+    sede: si se especifica (ej. 'punta cana' o 'santo domingo'), filtra los registros
+          que contengan esa sede en cualquier campo de texto. Solo aplica a tablas
+          con datos por sede (RESUMEN, CURSOS, GRUPOS).
     """
     if not AIRTABLE_ACCESS_TOKEN or not AIRTABLE_BASE_ID:
         raise ValueError(
@@ -25,13 +42,23 @@ def get_table(table_name: str) -> list[dict]:
     if table_name not in VALID_TABLES:
         return [{"error": f"Tabla '{table_name}' no válida. Usa una de: {VALID_TABLES}"}]
 
-    print(f"📋 Consultando tabla Airtable: {table_name}")
+    print(f"📋 Consultando tabla Airtable: {table_name}" + (f" (sede: {sede})" if sede else ""))
     api     = Api(AIRTABLE_ACCESS_TOKEN)
     table   = api.table(AIRTABLE_BASE_ID, table_name)
     records = table.all()
 
-    # Devuelve solo los fields para que el agente los procese fácil
-    return [r["fields"] for r in records]
+    all_fields = [r["fields"] for r in records]
+
+    # Filtrar por sede si se especificó y la tabla lo soporta
+    if sede and table_name in ("RESUMEN", "CURSOS", "GRUPOS"):
+        filtered = [f for f in all_fields if _record_matches_sede(f, sede)]
+        # Si el filtro no devuelve nada (por diferencias en nombres de campo),
+        # devolver todos para no romper el flujo
+        if filtered:
+            print(f"🔍 Filtrado por sede '{sede}': {len(filtered)}/{len(all_fields)} registros")
+            return filtered
+
+    return all_fields
 
 
 def history(db_history: list) -> list[ModelMessage]:
