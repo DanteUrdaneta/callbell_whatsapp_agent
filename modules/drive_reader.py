@@ -102,28 +102,65 @@ def get_multi_sede_courses() -> set:
     return _multi_sede
 
 
+# Mapeo de términos que usa el usuario -> course_key en _course_file_map
+# Las claves del mapa vienen del nombre del PDF (ej: "cotizacion de curso piloto privado")
+# pero el usuario dice cosas como "piloto privado", "piloto comercial", etc.
+USER_COURSE_ALIASES: dict[str, str] = {
+    "piloto privado": "cotizacion de curso piloto privado",
+    "piloto comercial": "cotizacion de curso piloto comercial",
+    "habilitacion de instrumento": "cotizacion de curso habilitacion de instrumento",
+    "habilitación de instrumento": "cotizacion de curso habilitacion de instrumento",
+    "instrumento": "cotizacion de curso habilitacion de instrumento",
+    "despachador": "cotizacion de curso despachador",
+    "tripulante de cabina": "cotizacion de curso tripulante de cabina",
+    "tripulante": "cotizacion de curso tripulante de cabina",
+    "carrera de piloto": "cotizacion carrera piloto profesional monomotor 2026",
+    "piloto profesional": "cotizacion carrera piloto profesional monomotor 2026",
+    "carrera piloto": "cotizacion carrera piloto profesional monomotor 2026",
+}
+
+
 def detect_course_from_message(message: str) -> str | None:
     """
     Detecta qué curso está pidiendo el usuario.
+    Primero intenta con aliases amigables (lo que el usuario escribe),
+    luego con las claves exactas del catálogo de PDFs.
     Si el curso es multi-sede y el mensaje no especifica sede,
     retorna el course_key genérico para que main.py pregunte la sede.
     """
     msg = _normalize(message)
 
+    # 1. Intentar con aliases de usuario (más fiable)
+    for alias, course_key in sorted(USER_COURSE_ALIASES.items(), key=lambda x: len(x[0]), reverse=True):
+        alias_norm = _normalize(alias)
+        if alias_norm in msg:
+            # Verificar si es multi-sede
+            for base_course in _multi_sede:
+                if course_key == base_course or course_key.startswith(base_course + " "):
+                    # Verificar si el mensaje ya incluye una sede específica
+                    for full_key in _course_file_map:
+                        if full_key.startswith(base_course + " "):
+                            sede_part = _normalize(full_key[len(base_course):].strip())
+                            sede_words = sede_part.split()
+                            if all(w in msg for w in sede_words):
+                                return full_key  # sede explícita en el mensaje
+                    return base_course  # sin sede → genérico
+            return course_key
+
+    # 2. Fallback: buscar por palabras de las claves del catálogo
     for key in sorted(_course_file_map.keys(), key=len, reverse=True):
         words = key.split()
         if all(w in msg for w in words):
-            # Verificar si pertenece a un curso multi-sede
             for base_course in _multi_sede:
                 if key.startswith(base_course + " "):
-                    # Solo retornar clave con sede si el mensaje menciona la sede explícitamente
                     sede_part = _normalize(key[len(base_course):].strip())
                     sede_words = sede_part.split()
                     if all(w in msg for w in sede_words):
-                        return key  # mensaje menciona la sede → clave específica
+                        return key
                     else:
-                        return base_course  # no menciona sede → genérico
-            return key  # curso sin multi-sede
+                        return base_course
+            return key
+
     return None
 
 
