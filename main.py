@@ -402,18 +402,15 @@ async def callbell_webhook(request: Request):
         pdf_enviado = False
 
         PDF_RESPONSES = [
-            "Ya te envié la cotización 😊",
+            "Ya te envié la cotización ",
             "Te acabo de compartir el documento con toda la información.",
             "Listo, ahí la tienes. Revísala con calma y me comentas cualquier duda.",
             "Perfecto, ya te mandé la cotización completa.",
             "Te la envié hace un momento. Si quieres te explico cualquier parte.",
             "Acabo de enviarte la cotización. Estoy pendiente por si tienes preguntas.",
-            "Ya la tienes en el chat 😊",
+            "Ya la tienes en el chat ",
         ]
 
-        # ✅ FIX: empieza en None — solo se asigna si realmente se procesa una cotización.
-        # Antes era random.choice(PDF_RESPONSES) desde el inicio, lo que causaba que el bot
-        # enviara mensajes como "Ya la tienes en el chat 😊" aunque no hubiera enviado ningún PDF.
         respuesta_pdf = None
 
         if pide_cotizacion:
