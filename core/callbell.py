@@ -20,7 +20,8 @@ async def send_callbell_message(to_phone: str, text_content: str):
             "text": text_content
         }
     }
-    async with httpx.AsyncClient() as client:
+    # FIX: agregado timeout=30 para no colgar el event loop indefinidamente
+    async with httpx.AsyncClient(timeout=30.0) as client:
         try:
             response = await client.post(url, json=payload, headers=headers)
             if response.status_code in [200, 201]:
@@ -64,8 +65,9 @@ async def send_callbell_document(to_phone: str, file_url: str, filename: str, fi
             return None
 
 
-def escalate_to_success(contact_uuid: str):
-    """Síncrona: asigna al equipo de Atención al Cliente y termina el bot."""
+# FIX: convertida a async para no bloquear el event loop con httpx.Client() síncrono
+async def escalate_to_success(contact_uuid: str):
+    """Async: asigna al equipo de Atención al Cliente y termina el bot."""
     url = f"https://api.callbell.eu/v1/contacts/{contact_uuid}"
     headers = {
         "Authorization": f"Bearer {CALLBELL_API_KEY}",
@@ -76,8 +78,8 @@ def escalate_to_success(contact_uuid: str):
         "bot_status": "bot_end"
     }
     try:
-        with httpx.Client() as client:
-            response = client.patch(url, json=payload, headers=headers)
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.patch(url, json=payload, headers=headers)
             if response.status_code in [200, 201]:
                 print(f"✅ Lead escalado a Atención al Cliente: {contact_uuid}")
                 return response.json()
