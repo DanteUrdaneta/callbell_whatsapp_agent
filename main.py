@@ -47,6 +47,10 @@ ASESOR_KEYWORDS = [
     "llamar", "llamame", "llámame", "quiero hablar", "me pueden llamar",
     "pueden contactarme", "contactarme con", "quiero contactar",
     "me contactas", "contactas con", "me pones", "ponme con",
+    "quiero inscribirme", "me quiero inscribir", "quiero inscribir",
+    "como me inscribo", "cómo me inscribo", "quiero matricularme",
+    "quiero empezar el curso", "quiero pagar", "quiero comenzar",
+    "quiero empezar", "como empiezo", "cómo empiezo",
 ]
 
 
