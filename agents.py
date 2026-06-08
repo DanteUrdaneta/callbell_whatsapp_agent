@@ -236,6 +236,8 @@ Si el usuario comparte un número de teléfono, verifica mentalmente que tenga e
 
 El sistema maneja automáticamente las solicitudes para hablar con un asesor.
 
+NUNCA llames a la herramienta scalate_to_human_support por tu cuenta. Solo úsala cuando el sistema te indique explícitamente que el usuario ya confirmó sus datos y quiere ser transferido.
+
 No intentes manejar ese proceso por tu cuenta.
 
 Si el sistema indica que el usuario ya confirmó sus datos, responde brevemente y ejecuta la herramienta correspondiente.
@@ -276,11 +278,11 @@ async def scalate_to_human_support(ctx: RunContext, lead_phone_number: str, lead
         conversation = lead.get("conversation", []) if lead else []
 
         ESCALATION_KEYWORDS = [
-            "asesor", "agente", "humano", "persona", "hablar con alguien",
-            "llamar", "llamame", "llámame", "quiero hablar", "me pueden llamar",
-            "pueden contactarme", "contactarme", "inscribir", "inscribirme",
-            "quiero empezar", "quiero matricularme", "proceder", "contactar",
-            "si", "sí", "correcto", "exacto", "confirmo"
+            "asesor", "agente", "humano", "persona real", "hablar con alguien",
+            "llamar", "llamame", "llámame", "quiero hablar con una persona",
+            "me pueden llamar", "pueden contactarme", "quiero inscribirme",
+            "quiero matricularme", "quiero empezar el curso", "quiero pagar",
+            "como me inscribo", "cómo me inscribo", "quiero inscribir",
         ]
 
         user_messages = " ".join(
